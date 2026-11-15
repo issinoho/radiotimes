@@ -20,31 +20,54 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      # A release published by hand for this tag (e.g. signed locally while
+      # the secrets weren't set up yet) is left alone; so is a repo
+      # without the signing secrets.
+      - name: Already released, or no signing key?
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HAS_KEY: ${{ secrets.RELEASE_KEYSTORE_B64 != '' }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::notice::$GITHUB_REF_NAME is already released; nothing to do"; echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$HAS_KEY" != "true" ]; then
+            echo "::warning::RELEASE_KEYSTORE_B64 is not set; can't sign a release"; echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-java@v4
+        if: steps.gate.outputs.skip != 'true'
         with:
           distribution: temurin
           java-version: "17"
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip != 'true'
         with:
           python-version: "3.11"
       - run: pip install requests==2.32.3 pytest
+        if: steps.gate.outputs.skip != 'true'
       - run: python -m pytest -q python-tests
+        if: steps.gate.outputs.skip != 'true'
         env:
           PYTHONPATH: app/src/main/python:vendor/tvdinner/src
       - name: Tag matches versionName
+        if: steps.gate.outputs.skip != 'true'
         run: |
           v=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != versionName $v"; exit 1; }
           echo "VERSION=$v" >> "$GITHUB_ENV"
       - name: Release keystore
+        if: steps.gate.outputs.skip != 'true'
         run: |
           echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
           echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
+        if: steps.gate.outputs.skip != 'true'
       - run: ./gradlew --no-daemon assembleRelease
+        if: steps.gate.outputs.skip != 'true'
         env:
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
       - name: Publish
+        if: steps.gate.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
