@@ -30,6 +30,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -687,6 +688,15 @@ private fun PlexNowPlayingFull(
             d.seriesTitle,
             d.season?.let { "Season $it" }, d.episode?.let { "Episode $it" },
         ).joinToString("  ·  ")
+        // Everything above the hint lives in one column that takes the panel's
+        // height; within it the details give way first (clipped), so the
+        // progress, the buttons and the hint below always stay on screen
+        // however long the synopsis, cast and file lines run.
+        Column(Modifier.weight(1f), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.weight(1f, fill = false).clipToBounds(),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
         if (heading.isNotEmpty()) Text(heading, color = Palette.dim, fontSize = 16.sp)
         Text(d.title, color = Palette.text, fontSize = 30.sp, fontWeight = FontWeight.Bold, maxLines = 2)
         Text(
@@ -703,6 +713,7 @@ private fun PlexNowPlayingFull(
         if (full && d.cast.isNotEmpty()) Text("Cast  ${d.cast.joinToString(", ")}", color = Palette.dim, fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         if (full) d.studio?.let { Text("Studio  $it", color = Palette.dim, fontSize = 14.sp) }
         if (full) listOfNotNull(d.video, d.audio).takeIf { it.isNotEmpty() }?.let { Text("File  ${it.joinToString("  ·  ")}", color = Palette.dim, fontSize = 14.sp) }
+        }
         if (durationMs > 0) {
             val left = (durationMs - positionMs).coerceAtLeast(0)
             ProgressBar((positionMs.toFloat() / durationMs).coerceIn(0f, 1f), Modifier.width(420.dp))
@@ -710,7 +721,7 @@ private fun PlexNowPlayingFull(
         }
         androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
         PanelOptions(picture, onPicture, subtitles, onSubtitles, search, onFindSubtitles, onPickSubtitle)
-        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        }
         Text(if (search != null) "Back: return" else "☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
     }
 }

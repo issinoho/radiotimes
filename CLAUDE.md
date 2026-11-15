@@ -51,7 +51,12 @@ from CI.
   carry provider credentials in the path. Plex stream and artwork URLs
   carry `X-Plex-Token` (they must, for ExoPlayer and Coil); never log them.
   Plex links reach the app via Settings or `--es plex`, never the repo.
-- **No tvtimes changes are assumed.** The app uses only `/api/exports/*`.
+- **No tvtimes changes are assumed.** The app uses only `/api/exports/*`,
+  plus, for pairing only, `/api/healthz` and `/api/pairing/start|poll`
+  (`Pairing.kt`; tvtimes PR #238). Pairing is optional: a tvtimes
+  without it is shown as unable to pair and the phone page / typed link
+  still work. Pairing talks to tvtimes directly (no tvdinner: there is
+  no link yet), and the token it receives goes only into the saved link.
   Watch reporting is the one write (`POST /api/exports/watch-events`,
   via tvdinner's `watch_events_payload`/`post_watch_events`); the local
   log is tvdinner's `history.jsonl` format in `filesDir` (app-private:

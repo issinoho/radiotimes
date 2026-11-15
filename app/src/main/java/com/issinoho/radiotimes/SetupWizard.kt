@@ -110,10 +110,10 @@ private fun Welcome(onNext: () -> Unit) {
         Text(
             "Your tvtimes line-up and guide, with the picture still playing while you browse, and your Plex " +
                 "libraries alongside. Setting up takes a minute, and you won't have to type a token with the remote: " +
-                "your phone does that part.",
+                "the TV pairs with tvtimes, or your phone sends the link.",
             color = Palette.dim, fontSize = 19.sp, lineHeight = 28.sp,
         )
-        Text("You'll need your tvtimes link (tvtimes → Settings → Export feeds) and, optionally, a Plex account.", color = Palette.dim, fontSize = 16.sp)
+        Text("You'll need to be signed in to tvtimes on a phone or computer and, optionally, a Plex account.", color = Palette.dim, fontSize = 16.sp)
         Spacer(Modifier.height(8.dp))
         Button(onClick = onNext, modifier = Modifier.focusRequester(go).focusRing()) { Text("Get started", fontSize = 17.sp) }
     }
@@ -139,20 +139,23 @@ private fun PhoneCard(phoneUrl: String?, title: String, modifier: Modifier = Mod
 @Composable
 private fun TvtimesStep(phoneUrl: String?, lineup: Tv.Lineup, onTvtimes: (String) -> Unit, onNext: () -> Unit) {
     var typing by remember { mutableStateOf(false) }
+    var pairing by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf("") }
     val valid = (url.trim().startsWith("tvtimes://") || url.trim().startsWith("tvtimess://")) && "token=" in url
     Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Connect your tvtimes guide", color = Palette.text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text(
-                "1.  Scan the code with your phone.\n" +
-                    "2.  On your phone, open tvtimes → Settings → Export feeds and copy the tvdinner link.\n" +
-                    "3.  Paste it into the page that opened, and press Send to TV.",
-                color = Palette.dim, fontSize = 17.sp, lineHeight = 27.sp,
+                "Pair this TV: it finds tvtimes on your network and shows a code to enter in tvtimes under " +
+                    "Settings → Devices. No link or token to copy.",
+                color = Palette.dim, fontSize = 17.sp, lineHeight = 26.sp,
             )
+            if (lineup !is Tv.Lineup.Ready && lineup != Tv.Lineup.Loading) {
+                PairWithTvtimes(focusFirst = !typing, onLinked = onTvtimes, onBusy = { pairing = it })
+            }
             Spacer(Modifier.height(4.dp))
             when (lineup) {
-                Tv.Lineup.Idle -> Text("Waiting for your phone…", color = Palette.text, fontSize = 18.sp)
+                Tv.Lineup.Idle -> {}
                 Tv.Lineup.Loading -> Text("Link received. Connecting to tvtimes…", color = Palette.text, fontSize = 18.sp)
                 is Tv.Lineup.Failed -> Text(
                     "That didn't work: ${redactTokens(lineup.message)}. Check the link and send it again.",
@@ -164,11 +167,14 @@ private fun TvtimesStep(phoneUrl: String?, lineup: Tv.Lineup, onTvtimes: (String
                     Button(onClick = onNext, modifier = Modifier.focusRequester(next).focusRing()) { Text("Next") }
                 }
             }
-            if (lineup !is Tv.Lineup.Ready) {
+            if (lineup !is Tv.Lineup.Ready && !pairing) {
+                Text(
+                    "Or, from your phone: scan the code, then paste your tvtimes link (tvtimes → Settings → Export feeds).",
+                    color = Palette.dim, fontSize = 15.sp, lineHeight = 22.sp,
+                )
                 if (!typing) {
-                    val type = rememberFirstFocus()
-                    OutlinedButton(onClick = { typing = true }, modifier = Modifier.focusRequester(type).focusRing()) {
-                        Text("Type it with the remote instead")
+                    OutlinedButton(onClick = { typing = true }, modifier = Modifier.focusRing()) {
+                        Text("Type the link with the remote")
                     }
                 } else {
                     OutlinedTextField(

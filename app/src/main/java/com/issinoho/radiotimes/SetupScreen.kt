@@ -72,10 +72,13 @@ fun SetupScreen(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("radiotimes", color = Palette.text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Your tvtimes link is in tvtimes under Settings → Export feeds. The easiest way to get it here is " +
-                    "from your phone: scan the code on the right.",
+                "Pair with tvtimes (enter the code it shows in tvtimes → Settings → Devices), or paste your " +
+                    "tvtimes link (Settings → Export feeds) from your phone using the code on the right.",
                 color = Palette.dim, fontSize = 16.sp,
             )
+            var pairing by remember { mutableStateOf(false) }
+            PairWithTvtimes(focusFirst = !valid, onLinked = { link -> onConnect(link, plex) }, onBusy = { pairing = it })
+            if (!pairing) {
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
@@ -105,6 +108,7 @@ fun SetupScreen(
                 "From a computer: adb shell am start -n com.issinoho.radiotimes/.MainActivity --es url '…' --es plex '…'",
                 color = Palette.dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
             )
+            }
         }
         Column(
             Modifier.width(330.dp).clip(RoundedCornerShape(14.dp)).background(Palette.surface).padding(22.dp),
@@ -119,7 +123,7 @@ fun SetupScreen(
                 Text("Not available: the TV has no home-network address.", color = Palette.dim, fontSize = 14.sp)
             }
             Spacer(Modifier.height(6.dp))
-            PlexLink(focusFirst = !valid, onLinked = { links ->
+            PlexLink(focusFirst = false, onLinked = { links ->
                 plex = links.joinToString(" ")
                 onPlexLinked(links)
             })

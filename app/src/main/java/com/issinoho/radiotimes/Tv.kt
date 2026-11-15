@@ -88,7 +88,9 @@ object Tv {
     // ---- watch reporting (tvdinner's --report-watch-state scheme) ----
 
     private var historyPath: String? = null
-    private var deviceName: String = ""
+    /** What this TV calls itself (its Fire TV name, else the model): for tvtimes reports and pairing. */
+    var deviceName: String = ""
+        private set
     private var reportJob: Job? = null
 
     /**

@@ -14,8 +14,11 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
 ## What it does
 
 - **Setup:** a first-run wizard (Welcome → tvtimes → Plex → Ready).
-  Scan the QR code on the TV (or open the address it shows on any phone
-  or computer on your network) and paste your links there; or **Link
+  **Pair with tvtimes**: the TV finds tvtimes on your network (or you
+  type its address), shows a code, and you enter it in tvtimes under
+  Settings → Devices; the TV gets its own revocable feed token. Or scan
+  the QR code on the TV (or open the address it shows on any phone or
+  computer on your network) and paste your links there; or **Link
   Plex account** (enter the code at plex.tv/link: every server on the
   account is added, no tokens); or type them with the remote, or send
   them from a computer (below).
@@ -58,14 +61,14 @@ XMLTV feed, first frame 2.1 s.
 Done: engine probe → live TV → guide over the picture → Plex (details,
 resume, skip intro/credits, tracks, search, transcode fallback) → setup
 from a phone and plex.tv/link → signed releases and the Downloader code
-→ tvtimes favourites, watchlist and watch reporting.
+→ tvtimes favourites, watchlist and watch reporting → find-and-approve
+pairing (the tvtimes side is tvtimes PR #238; discovery is a scan of the
+TV's /24 for tvtimes' `/api/healthz`, since mDNS from tvtimes' Docker
+bridge network wouldn't reach the LAN, with a typed address as the
+fallback).
 
 Next (each needs a change outside radiotimes):
 
-- **Find-and-approve pairing** *(needs a tvtimes change)*: tvtimes
-  advertises itself on the LAN (mDNS); the TV finds it, shows a code,
-  you approve it in tvtimes' Settings → Devices, and tvtimes issues the
-  TV its own revocable export token.
 - **"Send to Fire TV" from tvdinner** *(needs a tvdinner change)*:
   radiotimes advertises itself on the LAN; tvdinner's bookmarks screen
   pushes chosen tvtimes/Plex bookmarks to it in one keypress.
@@ -77,7 +80,7 @@ pings the TV but can't open a TCP connection to any device on the LAN
 (a test page on a laptop failed the same way), so something on the
 phone (a VPN or firewall app) blocks local connections; a laptop on the
 same network opens the page fine. radiotimes can't fix that from the
-TV; the tvtimes pairing above would avoid the LAN path entirely.
+TV; the tvtimes pairing above would avoid the LAN path entirely, and does once tvtimes has device pairing.
 
 ### Remote
 
