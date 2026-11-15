@@ -6,6 +6,10 @@
   button, shown whenever the item has subtitles (in the file or attached
   in Plex). Turning them back on picks a track in the device's language.
   Attaching subtitles online always switches them on.
+- **Everything in the ☰ panel fits on screen**: all three buttons with the
+  longest labels, and the subtitle results (the panel drops the summary
+  and credits while you choose). The player's own controls no longer pop
+  up by themselves (on an error) and take focus from the panel.
 
 ## 0.5.0
 

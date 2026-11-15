@@ -119,6 +119,9 @@ class VodPlayerActivity : ComponentActivity() {
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                                 setShowSubtitleButton(true)
                                 controllerShowTimeoutMs = 5_000
+                                // Shown by OK only: popping up by itself (on an error,
+                                // at the end) it took focus from the ☰ panel's buttons.
+                                controllerAutoShow = false
                                 resizeMode = picture.value.resizeMode
                                 // The banner goes with the controller it was shown with.
                                 setControllerVisibilityListener(
@@ -629,13 +632,15 @@ private fun PlexNowPlayingFull(
             color = Palette.text, fontSize = 15.sp,
         )
         if (d.genres.isNotEmpty()) Text(d.genres.joinToString(" · "), color = Palette.accent, fontSize = 15.sp)
-        d.tagline?.let { Text(it, color = Palette.dim, fontSize = 15.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) }
+        // While choosing subtitles the panel needs the room for the list.
+        val full = search == null
+        if (full) d.tagline?.let { Text(it, color = Palette.dim, fontSize = 15.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) }
         // Bounded so the panel's buttons stay on screen (1080p is 540dp tall).
-        d.description?.let { Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, maxLines = if (search == null) 5 else 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
-        d.director?.let { Text("Director  $it", color = Palette.dim, fontSize = 14.sp) }
-        if (d.cast.isNotEmpty()) Text("Cast  ${d.cast.joinToString(", ")}", color = Palette.dim, fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-        d.studio?.let { Text("Studio  $it", color = Palette.dim, fontSize = 14.sp) }
-        listOfNotNull(d.video, d.audio).takeIf { it.isNotEmpty() }?.let { Text("File  ${it.joinToString("  ·  ")}", color = Palette.dim, fontSize = 14.sp) }
+        if (full) d.description?.let { Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 5, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+        if (full) d.director?.let { Text("Director  $it", color = Palette.dim, fontSize = 14.sp) }
+        if (full && d.cast.isNotEmpty()) Text("Cast  ${d.cast.joinToString(", ")}", color = Palette.dim, fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        if (full) d.studio?.let { Text("Studio  $it", color = Palette.dim, fontSize = 14.sp) }
+        if (full) listOfNotNull(d.video, d.audio).takeIf { it.isNotEmpty() }?.let { Text("File  ${it.joinToString("  ·  ")}", color = Palette.dim, fontSize = 14.sp) }
         if (durationMs > 0) {
             val left = (durationMs - positionMs).coerceAtLeast(0)
             ProgressBar((positionMs.toFloat() / durationMs).coerceIn(0f, 1f), Modifier.width(420.dp))
@@ -688,7 +693,7 @@ private fun PanelOptions(
         is SubtitleSearch.Results -> {
             Text("Choose subtitles (from ${search.found.first().provider.ifEmpty { "Plex" }})", color = Palette.dim, fontSize = 14.sp)
             androidx.compose.foundation.lazy.LazyColumn(
-                Modifier.height(150.dp),
+                Modifier.height(230.dp),
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
             ) {
                 items(search.found.size) { i ->
