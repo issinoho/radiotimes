@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - **First-run setup wizard**: Welcome → tvtimes → Plex (optional) →
   Ready. The phone setup page runs throughout, so links sent from a phone
