@@ -52,6 +52,9 @@ from CI.
   carry `X-Plex-Token` (they must, for ExoPlayer and Coil); never log them.
   Plex links reach the app via Settings or `--es plex`, never the repo.
 - **No tvtimes changes are assumed.** The app uses only `/api/exports/*`.
+- **The phone setup server (`SetupServer`) only runs while the setup
+  screen is open** and only answers requests carrying its one-time code.
+  Keep both properties.
 
 ## Platform notes
 

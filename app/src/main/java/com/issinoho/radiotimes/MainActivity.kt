@@ -8,7 +8,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -49,10 +52,27 @@ class MainActivity : ComponentActivity() {
                         Screen.Setup -> {
                             val canCancel = Prefs.tvtimesUrl(this) != null
                             BackHandler(enabled = canCancel) { screen.value = Screen.Channels }
+                            // The phone setup page lives exactly as long as this screen.
+                            var phoneUrl by remember { mutableStateOf<String?>(null) }
+                            var plexVersion by remember { mutableStateOf(0) }
+                            DisposableEffect(Unit) {
+                                val server = SetupServer { tvtimes, plex ->
+                                    if (plex.isNotEmpty()) setPlex(plex)
+                                    plexVersion++
+                                    when {
+                                        tvtimes != null -> connect(tvtimes)
+                                        Prefs.tvtimesUrl(this@MainActivity) != null -> screen.value = Screen.Channels
+                                    }
+                                }
+                                phoneUrl = server.start()
+                                onDispose { server.stop() }
+                            }
                             SetupScreen(
                                 initial = Prefs.tvtimesUrl(this).orEmpty(),
-                                initialPlex = Prefs.plexLinks(this).joinToString(" "),
+                                initialPlex = remember(plexVersion) { Prefs.plexLinks(this).joinToString(" ") },
                                 canCancel = canCancel,
+                                phoneUrl = phoneUrl,
+                                onPlexLinked = { setPlex(it) },
                                 onConnect = { url, plex ->
                                     setPlex(Prefs.splitLinks(plex))
                                     connect(url)

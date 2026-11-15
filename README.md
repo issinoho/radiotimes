@@ -13,7 +13,10 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
 
 ## Status: Phase 1 — live TV
 
-- **Setup:** enter the tvtimes link once (or send it from a computer, below).
+- **Setup:** scan the QR code on the TV and paste your links on your
+  phone; or **Link Plex account** (enter the code at plex.tv/link: every
+  server on the account is added, no tokens); or type them with the
+  remote, or send them from a computer (below).
 - **Channel list:** groups down the left, channels with logo and what's on
   now, details of the focused channel on the right. The guide shows at once
   from cache and refreshes in the background when it's over 6 hours old.
@@ -35,8 +38,25 @@ Phase 0 measured the engine on a Fire TV Stick (Fire OS 8, 32-bit ARM):
 channel list 0.4 s, guide from cache 0.4 s, fresh guide ~15 s for an 11.6 MB
 XMLTV feed, first frame 2.1 s.
 
-Roadmap: 0 probe ✓ → 1 live TV ✓ → 2 guide grid ✓ → 3 Plex ✓ (first
-cut) → tvtimes sync (favourites, watchlist, watch reporting) → polish.
+### Roadmap
+
+Done: 0 engine probe → 1 live TV → 2 guide over the picture → 3 Plex
+(details, resume, skip intro/credits, tracks, search) → setup from a
+phone and plex.tv/link.
+
+Next:
+
+- **Releases**: signed APKs on GitHub Releases, installable on a Fire TV
+  with the Downloader app's short code.
+- **tvtimes sync**: favourites, watchlist, watch reporting.
+- **Find-and-approve pairing** *(needs a tvtimes change)*: tvtimes
+  advertises itself on the LAN (mDNS); the TV finds it, shows a code,
+  you approve it in tvtimes' Settings → Devices, and tvtimes issues the
+  TV its own revocable export token.
+- **"Send to Fire TV" from tvdinner** *(needs a tvdinner change)*:
+  radiotimes advertises itself on the LAN; tvdinner's bookmarks screen
+  pushes chosen tvtimes/Plex bookmarks to it in one keypress.
+- **plex.tv linking in tvdinner itself**, so both apps share it.
 
 ### Remote
 

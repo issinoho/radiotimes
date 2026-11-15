@@ -429,3 +429,59 @@ def test_plex_name_falls_back_to_host(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(requests, "get", down)
     servers = json.loads(bridge.plex_configure(json.dumps([PLEX_LINK]), str(tmp_path)))
     assert servers == [{"base_url": PLEX, "name": "plex.example.test:32400"}]
+
+
+
+# --------------------------------------------------------------------------
+# plex.tv/link
+
+
+class _PlexTv:
+    def __init__(self) -> None:
+        self.linked = False
+
+    def post(self, url: str, *args: object, **kwargs: object) -> _FakeResponse:
+        assert url == "https://plex.tv/api/v2/pins"
+        assert kwargs["headers"]["X-Plex-Product"] == "radiotimes"
+        return _FakeResponse({"id": 42, "code": "AB12", "authToken": None})
+
+    def get(self, url: str, *args: object, **kwargs: object) -> _FakeResponse:
+        if url == "https://plex.tv/api/v2/pins/42":
+            return _FakeResponse({"id": 42, "authToken": "acct-token" if self.linked else None})
+        if url == "https://plex.tv/api/v2/pins/43":
+            return _FakeResponse(b"", status=404)
+        if url == "https://plex.tv/api/v2/resources":
+            assert kwargs["headers"]["X-Plex-Token"] == "acct-token"
+            return _FakeResponse([
+                {"name": "SmithPlex", "provides": "server", "accessToken": "srv1", "connections": [
+                    {"protocol": "https", "address": "203.0.113.5", "port": 32400, "uri": "https://203-0-113-5.abc.plex.direct:32400", "local": False},
+                    {"protocol": "https", "address": "192.168.0.192", "port": 32400, "uri": "https://192-168-0-192.abc.plex.direct:32400", "local": True},
+                ]},
+                {"name": "Away", "provides": "server", "accessToken": "srv2", "connections": [
+                    {"protocol": "https", "address": "198.51.100.7", "port": 443, "uri": "https://198-51-100-7.def.plex.direct:443", "local": False},
+                    {"protocol": "https", "address": "relay", "port": 8443, "uri": "https://relay.plex.direct:8443", "local": False, "relay": True},
+                ]},
+                {"name": "My phone", "provides": "client,player", "accessToken": "x", "connections": []},
+            ])
+        raise AssertionError(url)
+
+
+def test_plex_link_flow(monkeypatch, tmp_path) -> None:
+    fake = _PlexTv()
+    monkeypatch.setattr(requests, "post", fake.post)
+    monkeypatch.setattr(requests, "get", fake.get)
+    assert json.loads(bridge.plex_link_start(str(tmp_path))) == {"id": 42, "code": "AB12"}
+    assert json.loads(bridge.plex_link_poll(42)) == {"done": False}
+    fake.linked = True
+    result = json.loads(bridge.plex_link_poll(42))
+    assert result == {"done": True, "servers": [
+        {"name": "SmithPlex", "link": "plex://192.168.0.192:32400?X-Plex-Token=srv1"},
+        {"name": "Away", "link": "plexs://198-51-100-7.def.plex.direct:443?X-Plex-Token=srv2"},
+    ]}
+    # The links are what plex_configure takes.
+    assert bridge.tv_plex.parse_plex_url(result["servers"][1]["link"]).base_url == "https://198-51-100-7.def.plex.direct:443"
+
+
+def test_plex_link_expired(monkeypatch) -> None:
+    monkeypatch.setattr(requests, "get", _PlexTv().get)
+    assert "expired" in json.loads(bridge.plex_link_poll(43))["error"]

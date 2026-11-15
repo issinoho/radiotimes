@@ -603,3 +603,78 @@ def _plex_extras(creds: tv_plex.PlexCreds, rating_key: str) -> dict[str, Any]:
         "subtitles": [st.get("displayTitle") or st.get("language") for st in streams if st.get("streamType") == 3],
         "sidecar_subtitles": sidecars,
     }
+
+
+# --------------------------------------------------------------------------
+# Linking a Plex account (plex.tv/link)
+#
+# Plex's own PIN flow, as its TV apps use: the TV shows a short code, the
+# user enters it at plex.tv/link, and the account's token then lists every
+# server it can reach -- each with its own access token and connections.
+# Not in tvdinner (which takes plex:// links); plain requests to plex.tv.
+
+_PLEX_TV = "https://plex.tv/api/v2"
+
+
+def _plex_tv_headers(token: str | None = None) -> dict[str, str]:
+    headers = {
+        "Accept": "application/json",
+        "X-Plex-Product": "radiotimes",
+        "X-Plex-Client-Identifier": _plex_client_id or "radiotimes",
+    }
+    if token:
+        headers["X-Plex-Token"] = token
+    return headers
+
+
+@_guarded
+def plex_link_start(files_dir: str) -> str:
+    """Ask plex.tv for a PIN. Returns `{"id", "code"}`; show the code."""
+    global _plex_client_id
+    if _plex_client_id is None:
+        _plex_client_id = tv_plex.load_plex_client_id(Path(files_dir) / "plex_client_id.json")
+    r = requests.post(f"{_PLEX_TV}/pins", headers=_plex_tv_headers(), timeout=15)
+    r.raise_for_status()
+    pin = r.json()
+    return _ok({"id": pin["id"], "code": pin["code"]})
+
+
+@_guarded
+def plex_link_poll(pin_id: int) -> str:
+    """`{"done": false}` until the code has been entered at plex.tv/link,
+    then `{"done": true, "servers": [{"name", "link"}]}` -- a plex:// link
+    per server, ready for plex_configure. Expired PINs are an error."""
+    r = requests.get(f"{_PLEX_TV}/pins/{int(pin_id)}", headers=_plex_tv_headers(), timeout=15)
+    if r.status_code == 404:
+        return _err("The code expired. Start again.")
+    r.raise_for_status()
+    token = r.json().get("authToken")
+    if not token:
+        return _ok({"done": False})
+    r = requests.get(f"{_PLEX_TV}/resources", params={"includeHttps": "1"}, headers=_plex_tv_headers(token), timeout=15)
+    r.raise_for_status()
+    servers = []
+    for res in r.json():
+        if "server" not in str(res.get("provides", "")).split(",") or not res.get("accessToken"):
+            continue
+        link = _plex_link_for(res)
+        if link:
+            servers.append({"name": res.get("name") or "Plex", "link": link})
+    return _ok({"done": True, "servers": servers})
+
+
+def _plex_link_for(resource: dict) -> str | None:
+    """A server's best connection as a tvdinner plex:// link: a direct
+    connection on the home network (plain http to its address -- what a
+    TV next to the server should use), else a direct remote one (https via
+    its plex.direct name), never a relay."""
+    conns = [c for c in resource.get("connections") or [] if isinstance(c, dict) and not c.get("relay")]
+    token = resource["accessToken"]
+    local = next((c for c in conns if c.get("local") and c.get("address") and c.get("port")), None)
+    if local:
+        return f"plex://{local['address']}:{local['port']}?X-Plex-Token={token}"
+    remote = next((c for c in conns if c.get("uri", "").startswith("https://")), None)
+    if remote:
+        host = remote["uri"].split("://", 1)[1].rstrip("/")
+        return f"plexs://{host}?X-Plex-Token={token}"
+    return None
