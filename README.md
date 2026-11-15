@@ -18,11 +18,15 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   now, details of the focused channel on the right. The guide shows at once
   from cache and refreshes in the background when it's over 6 hours old.
 - **Player:** fullscreen live TV with a now/next banner.
-- **Plex:** each Plex server is an entry in the group rail. Browse On
-  Deck and libraries as poster grids, shows → seasons → episodes; plays
-  the file directly with a seek bar, resumes where Plex says you left
-  off, reports progress back to Plex (resume points, watched), and starts
-  the next episode when one ends.
+- **Plex:** each Plex server is an entry in the group rail. Search, On
+  Deck and libraries as poster grids, shows → seasons → episodes. OK on a
+  movie or episode opens its details (summary, cast, director, genres,
+  runtime, file quality, progress) with **Resume** / **Play from the
+  start**. Plays the file directly with a seek bar; **Skip intro** /
+  **Skip credits** (or **Next episode**) at Plex's markers; audio and
+  subtitle tracks, including Plex's sidecar subtitle files, from the
+  player's ⚙ and CC menus; progress reported back to Plex; the next
+  episode starts when one ends.
 - **Guide:** ☰ opens a channels × time grid over the picture, which keeps
   playing in the corner; OK previews a channel, OK again shows the
   programme's full details.
@@ -46,9 +50,10 @@ cut) → tvtimes sync (favourites, watchlist, watch reporting) → polish.
 | | OK | show or hide what's on |
 | | ☰ | guide, with the channel still playing in the corner |
 | | Back | back to the list |
-| Plex | OK | open / play |
+| Plex | OK | open a list, or a movie/episode's details |
+| | OK on Resume / Play | play |
 | | Back | up a level |
-| Plex player | OK | pause / play |
+| Plex player | OK | pause / play — or press the Skip / Next episode button when it shows |
 | | ↑ ↓ ← → | show the seek bar and controls |
 | | ⏪ ⏩ | back 10 s / forward 30 s |
 | | Back | hide controls, then leave (progress is saved to Plex) |

@@ -66,13 +66,16 @@ class PlexActivity : ComponentActivity() {
     /** One level of the drill-down. `focus` is restored when coming back up to it. */
     private class Level(val node: PlexNode?, val title: String) {
         var items by mutableStateOf<List<PlexNode>?>(null)
+        var detail by mutableStateOf<PlexDetail?>(null)
         var error by mutableStateOf<String?>(null)
+        var query by mutableStateOf("")
         var focus = 0
+        val isSearch get() = node?.kind == SEARCH
+        val isDetail get() = node != null && !node.container && !isSearch
     }
 
     private val stack = mutableStateListOf<Level>()
     private var server = 0
-    private val opening = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,12 +90,13 @@ class PlexActivity : ComponentActivity() {
                         if (stack.size > 1) stack.removeAt(stack.lastIndex) else finish()
                     }
                     val level = stack.lastOrNull() ?: return@Surface
-                    Browser(
-                        path = stack.map { it.title },
-                        level = level,
-                        opening = opening.value,
-                        onOpen = ::open,
-                    )
+                    val detail = level.detail
+                    when {
+                        level.isDetail && detail != null -> PlexDetailScreen(detail) { fromStart ->
+                            startActivity(VodPlayerActivity.intent(this@PlexActivity, server, detail.json, fromStart))
+                        }
+                        else -> Browser(path = stack.map { it.title }, level = level, onOpen = ::open, onSearch = ::search)
+                    }
                 }
             }
         }
@@ -101,7 +105,7 @@ class PlexActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Back from the player: watched/in-progress state has moved on.
-        stack.lastOrNull()?.takeIf { it.items != null }?.let { reload(it) }
+        stack.lastOrNull()?.takeIf { it.items != null || it.detail != null }?.let { reload(it) }
     }
 
     private fun push(level: Level) {
@@ -110,42 +114,55 @@ class PlexActivity : ComponentActivity() {
     }
 
     private fun reload(level: Level) {
+        if (level.isSearch && level.query.isBlank()) {
+            level.items = emptyList()
+            return
+        }
         lifecycleScope.launch {
-            val json = Engine.callPlex("plex_children", server, level.node?.json)
+            val json = when {
+                level.isSearch -> Engine.callPlex("plex_search", server, level.query)
+                level.isDetail -> Engine.callPlex("plex_resolve", server, level.node!!.json)
+                else -> Engine.callPlex("plex_children", server, level.node?.json)
+            }
             val error = bridgeError(json)
             if (error != null) {
                 level.error = redactTokens(error)
                 Log.w(TAG, "plex | ${level.title}: ${level.error}")
-            } else {
-                level.items = parsePlexNodes(json)
-                level.error = null
+                return@launch
+            }
+            level.error = null
+            when {
+                level.isDetail -> level.detail = PlexDetail(json)
+                level.node == null -> level.items = listOf(searchNode) + parsePlexNodes(json)
+                else -> level.items = parsePlexNodes(json)
             }
         }
     }
 
+    private fun search(query: String) {
+        val level = stack.lastOrNull()?.takeIf { it.isSearch } ?: return
+        level.query = query.trim()
+        level.items = null
+        reload(level)
+    }
+
+    /** Containers and Search open a list; a movie or episode opens its details page. */
     private fun open(node: PlexNode, index: Int) {
         stack.lastOrNull()?.focus = index
-        if (node.container) {
-            push(Level(node, node.title))
-            return
-        }
-        if (opening.value != null) return
-        opening.value = node.title
-        lifecycleScope.launch {
-            val json = Engine.callPlex("plex_resolve", server, node.json)
-            opening.value = null
-            val error = bridgeError(json)
-            if (error != null) {
-                stack.lastOrNull()?.error = redactTokens(error)
-                return@launch
-            }
-            startActivity(VodPlayerActivity.intent(this@PlexActivity, server, json))
-        }
+        push(Level(node, node.title))
     }
 
     companion object {
         private const val EXTRA_SERVER = "server"
         private const val EXTRA_NAME = "name"
+        private const val SEARCH = "search"
+
+        /** A tile at the top of the libraries, not a Plex node. */
+        private val searchNode = PlexNode(
+            ratingKey = SEARCH, title = "Search", kind = SEARCH, container = true,
+            subtitle = "Movies, shows and episodes", thumb = null, watched = false, progress = null,
+            year = null, seriesTitle = null, seasonThumb = null, json = "{}",
+        )
 
         fun intent(context: Context, server: PlexServer): Intent =
             Intent(context, PlexActivity::class.java)
@@ -154,7 +171,7 @@ class PlexActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Browser(path: List<String>, level: Level, opening: String?, onOpen: (PlexNode, Int) -> Unit) {
+    private fun Browser(path: List<String>, level: Level, onOpen: (PlexNode, Int) -> Unit, onSearch: (String) -> Unit) {
         var focused by remember(level) { mutableStateOf<PlexNode?>(null) }
         Column(Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 22.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -168,10 +185,16 @@ class PlexActivity : ComponentActivity() {
                 Text(clockText(rememberNow()), color = Palette.text, fontSize = 20.sp)
             }
             Spacer(Modifier.height(10.dp))
-            FocusedSummary(focused, opening, Modifier.fillMaxWidth().height(78.dp))
+            if (level.isSearch) {
+                SearchBox(level.query, onSearch)
+                Spacer(Modifier.height(8.dp))
+            }
+            FocusedSummary(focused, Modifier.fillMaxWidth().height(78.dp))
             Spacer(Modifier.height(8.dp))
             val items = level.items
             when {
+                level.isSearch && level.query.isBlank() -> Message("Type a title, then press Search on the keyboard")
+                level.isSearch && items != null && items.isEmpty() -> Message("Nothing found for \u201c${level.query}\u201d")
                 level.error != null && items == null -> Message("Couldn't load: ${level.error}")
                 items == null -> Message("Loading…")
                 items.isEmpty() -> Message("Nothing here")
@@ -183,18 +206,34 @@ class PlexActivity : ComponentActivity() {
     }
 }
 
+/**
+ * The one place focus may start on a text field: here typing is the
+ * point. OK opens the keyboard; its Search key runs the search.
+ */
+@Composable
+private fun SearchBox(initial: String, onSearch: (String) -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    val requester = remember { FocusRequester() }
+    androidx.compose.material3.OutlinedTextField(
+        value = text,
+        onValueChange = { text = it },
+        label = { Text("Search") },
+        singleLine = true,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { if (text.isNotBlank()) onSearch(text) }),
+        modifier = Modifier.width(600.dp).focusRequester(requester),
+    )
+    LaunchedEffect(Unit) { if (initial.isBlank()) runCatching { requester.requestFocus() } }
+}
+
 @Composable
 private fun Message(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(text, color = Palette.dim, fontSize = 18.sp) }
 }
 
 @Composable
-private fun FocusedSummary(node: PlexNode?, opening: String?, modifier: Modifier) {
+private fun FocusedSummary(node: PlexNode?, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (opening != null) {
-            Text("Opening $opening…", color = Palette.text, fontSize = 20.sp)
-            return@Column
-        }
         node ?: return@Column
         // An episode's subtitle already names the show ("Show · S01E04 · …").
         Text(

@@ -326,7 +326,15 @@ PLEX_ROUTES: dict[str, object] = {
         "MediaContainer": {
             "Metadata": [
                 {"ratingKey": "10", "title": "Casino Royale", "type": "movie", "year": 2006, "summary": "Bond.",
-                 "viewOffset": 600000, "Media": [{"Part": [{"key": "/library/parts/99/file.mkv"}]}]},
+                 "viewOffset": 600000, "duration": 8700000, "contentRating": "12",
+                 "Genre": [{"tag": "Action"}], "Role": [{"tag": "Daniel Craig"}, {"tag": "Eva Green"}],
+                 "Media": [{"videoResolution": "1080", "videoCodec": "h264", "Part": [{"key": "/library/parts/99/file.mkv",
+                   "Stream": [
+                       {"streamType": 2, "displayTitle": "English (AC3 5.1)", "selected": True},
+                       {"streamType": 3, "codec": "vobsub", "displayTitle": "English (embedded)"},
+                       {"streamType": 3, "codec": "srt", "key": "/library/streams/7", "languageTag": "en",
+                        "displayTitle": "English (SRT External)"},
+                   ]}]}]},
             ]
         }
     },
@@ -369,6 +377,34 @@ def test_plex_library_children_and_resolve(plex) -> None:
     assert item["url"] == f"{PLEX}/library/parts/99/file.mkv?X-Plex-Token={PLEX_TOKEN}"
     assert item["resume_seconds"] == 600
     assert item["description"] == "Bond."
+    # Details beyond tvdinner's VodItem
+    assert item["duration_ms"] == 8700000 and item["content_rating"] == "12"
+    assert item["genres"] == ["Action"] and item["cast"] == ["Daniel Craig", "Eva Green"]
+    assert item["video"] == "1080p H264" and item["audio"] == "English (AC3 5.1)"
+    assert item["sidecar_subtitles"] == [{
+        "url": f"{PLEX}/library/streams/7?X-Plex-Token={PLEX_TOKEN}", "mime": "application/x-subrip",
+        "language": "en", "label": "English (SRT External)",
+    }]
+
+
+def test_plex_resolve_survives_missing_details(plex, monkeypatch) -> None:
+    films = json.loads(bridge.plex_children(0))[1]
+    movie = json.loads(bridge.plex_children(0, json.dumps(films)))[0]
+    real_get = requests.get
+    calls = {"n": 0}
+
+    def flaky(url: str, *args: object, **kwargs: object):
+        # tvdinner's resolve GET succeeds; the details GET (second) fails.
+        if "/library/metadata/10" in url:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise requests.ConnectionError("gone")
+        return real_get(url, *args, **kwargs)
+
+    monkeypatch.setattr(requests, "get", flaky)
+    item = json.loads(bridge.plex_resolve(0, json.dumps(movie)))
+    assert item["url"].endswith("file.mkv?X-Plex-Token=" + PLEX_TOKEN)
+    assert "genres" not in item
 
 
 def test_plex_errors_never_carry_the_token(plex, monkeypatch, capfd) -> None:

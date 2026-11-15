@@ -55,9 +55,12 @@ import java.util.UUID
  */
 @OptIn(UnstableApi::class)
 class VodPlayerActivity : ComponentActivity() {
+    private data class Marker(val startMs: Long, val endMs: Long)
+    private data class Sidecar(val url: String, val mime: String, val language: String?, val label: String?)
     private data class Item(
         val title: String, val url: String, val ratingKey: String, val resumeSeconds: Double?,
         val seriesTitle: String?, val parentKey: String?, val grandparentKey: String?,
+        val intro: Marker?, val credits: Marker?, val sidecars: List<Sidecar>,
     )
 
     private var player: ExoPlayer? = null
@@ -67,14 +70,19 @@ class VodPlayerActivity : ComponentActivity() {
     private var session = UUID.randomUUID().toString()
     private var reportJob: Job? = null
     private var started = 0L
+    private var firstFrameLogged = false
     private val notice = mutableStateOf<String?>(null)
     private var noticeJob: Job? = null
+    /** "Skip intro" / "Skip credits" / "Next episode", while inside a Plex marker. */
+    private val skip = mutableStateOf<String?>(null)
+    private var markerJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         server = intent.getIntExtra(EXTRA_SERVER, 0)
         item = parse(intent.getStringExtra(EXTRA_ITEM) ?: return finish())
+        if (intent.getBooleanExtra(EXTRA_FROM_START, false)) item = item.copy(resumeSeconds = null)
 
         setContent {
             RadiotimesTheme {
@@ -91,6 +99,15 @@ class VodPlayerActivity : ComponentActivity() {
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
+                    skip.value?.let {
+                        Text(
+                            "$it   ›  OK",
+                            color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                            // Above the controller's seek bar, which it would otherwise cover.
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 150.dp).clip(RoundedCornerShape(24.dp))
+                                .background(Color.White).padding(horizontal = 22.dp, vertical = 12.dp),
+                        )
+                    }
                     notice.value?.let {
                         Column(
                             Modifier.align(Alignment.TopStart).padding(40.dp).clip(RoundedCornerShape(8.dp))
@@ -107,7 +124,16 @@ class VodPlayerActivity : ComponentActivity() {
     private fun parse(json: String): Item {
         val o = JSONObject(json)
         fun s(k: String) = if (o.isNull(k)) null else o.optString(k).ifEmpty { null }
+        fun marker(k: String) = o.optJSONObject(k)?.let { m ->
+            Marker((m.optDouble("start") * 1000).toLong(), (m.optDouble("end") * 1000).toLong())
+        }
+        val subs = o.optJSONArray("sidecar_subtitles")
         return Item(
+            intro = marker("intro"),
+            credits = marker("credits"),
+            sidecars = (0 until (subs?.length() ?: 0)).mapNotNull { i ->
+                subs!!.optJSONObject(i)?.let { Sidecar(it.getString("url"), it.getString("mime"), it.optString("language").ifEmpty { null }, it.optString("label").ifEmpty { null }) }
+            },
             title = o.optString("title"),
             url = o.getString("url"),
             ratingKey = o.getString("rating_key"),
@@ -133,6 +159,9 @@ class VodPlayerActivity : ComponentActivity() {
             .build()
         exo.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() {
+                // Fires again after every seek; only the start is interesting.
+                if (firstFrameLogged) return
+                firstFrameLogged = true
                 val f = exo.videoFormat
                 val a = exo.audioFormat
                 Log.i(
@@ -167,11 +196,41 @@ class VodPlayerActivity : ComponentActivity() {
                 if (player?.isPlaying == true) report("playing")
             }
         }
+        markerJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(500)
+                skip.value = skipLabel()
+            }
+        }
+    }
+
+    private fun skipLabel(): String? {
+        val pos = player?.currentPosition ?: return null
+        item.intro?.let { if (pos in it.startMs until it.endMs) return "Skip intro" }
+        item.credits?.let { if (pos in it.startMs until it.endMs) return if (item.parentKey != null) "Next episode" else "Skip credits" }
+        return null
+    }
+
+    /** OK while a skip button shows: past the intro, or past the credits (to the next episode). */
+    private fun doSkip() {
+        val exo = player ?: return
+        val pos = exo.currentPosition
+        item.intro?.takeIf { pos in it.startMs until it.endMs }?.let { exo.seekTo(it.endMs); skip.value = null; return }
+        item.credits?.takeIf { pos in it.startMs until it.endMs }?.let {
+            skip.value = null
+            if (item.parentKey != null) {
+                report("stopped")
+                playNextEpisode(immediately = true)
+            } else {
+                exo.seekTo(it.endMs)
+            }
+        }
     }
 
     override fun onStop() {
         super.onStop()
         reportJob?.cancel()
+        markerJob?.cancel()
         report("stopped")
         view?.player = null
         player?.release()
@@ -182,9 +241,20 @@ class VodPlayerActivity : ComponentActivity() {
         item = next
         session = UUID.randomUUID().toString()
         started = SystemClock.elapsedRealtime()
+        firstFrameLogged = false
         val exo = player ?: return
         val resumeMs = next.resumeSeconds?.takeIf { it > 30 }?.let { (it * 1000).toLong() } ?: C.TIME_UNSET
-        exo.setMediaItem(MediaItem.fromUri(next.url), resumeMs.takeIf { it != C.TIME_UNSET } ?: 0L)
+        // Plex's sidecar subtitle files (not inside the media file) join the
+        // file's own tracks in the controller's CC menu.
+        val subtitles = next.sidecars.map { sc ->
+            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(sc.url))
+                .setMimeType(sc.mime)
+                .setLanguage(sc.language)
+                .setLabel(sc.label)
+                .build()
+        }
+        val media = MediaItem.Builder().setUri(next.url).setSubtitleConfigurations(subtitles).build()
+        exo.setMediaItem(media, resumeMs.takeIf { it != C.TIME_UNSET } ?: 0L)
         exo.playWhenReady = true
         exo.prepare()
         val title = listOfNotNull(next.seriesTitle, next.title).joinToString(" · ")
@@ -204,7 +274,7 @@ class VodPlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun playNextEpisode() {
+    private fun playNextEpisode(immediately: Boolean = false) {
         val parent = item.parentKey ?: return finish()
         val current = item.ratingKey
         val grandparent = item.grandparentKey
@@ -213,7 +283,7 @@ class VodPlayerActivity : ComponentActivity() {
             if (bridgeError(nextJson) != null || nextJson.trim() == "null") return@launch finish()
             val node = parsePlexNode(JSONObject(nextJson))
             showNotice("Up next: ${node.title}", sticky = true)
-            delay(5_000)
+            if (!immediately) delay(5_000)
             if (player == null) return@launch
             val resolved = Engine.callPlex("plex_resolve", server, node.json)
             if (bridgeError(resolved) != null) return@launch finish()
@@ -231,6 +301,13 @@ class VodPlayerActivity : ComponentActivity() {
         // OK with the controller hidden toggles pause, like every TV player;
         // otherwise the controller (seek bar, buttons) takes the D-pad.
         val v = view
+        // A showing skip button takes OK (when the controller is hidden).
+        if (skip.value != null && v != null && !v.isControllerFullyVisible &&
+            event.keyCode in intArrayOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)
+        ) {
+            if (event.action == KeyEvent.ACTION_UP) doSkip()
+            return true
+        }
         // Back hides the controller first, then leaves.
         if (v != null && v.isControllerFullyVisible && event.keyCode == KeyEvent.KEYCODE_BACK) {
             if (event.action == KeyEvent.ACTION_UP) v.hideController()
@@ -252,11 +329,13 @@ class VodPlayerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_SERVER = "server"
         private const val EXTRA_ITEM = "item"
+        private const val EXTRA_FROM_START = "from_start"
 
-        fun intent(context: Context, server: Int, resolvedJson: String): Intent =
+        fun intent(context: Context, server: Int, resolvedJson: String, fromStart: Boolean = false): Intent =
             Intent(context, VodPlayerActivity::class.java)
                 .putExtra(EXTRA_SERVER, server)
                 .putExtra(EXTRA_ITEM, resolvedJson)
+                .putExtra(EXTRA_FROM_START, fromStart)
     }
 }
 

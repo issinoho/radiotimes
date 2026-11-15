@@ -496,8 +496,10 @@ def plex_resolve(server: int, node_json: str) -> str:
     def marker(m: Any) -> dict[str, float] | None:
         return {"start": m.start_seconds, "end": m.end_seconds} if m else None
 
+    creds = _plex_server(server)
     return _ok(
         {
+            **_plex_extras(creds, str(item.rating_key)),
             "title": item.title,
             "url": item.url,
             "poster": item.poster_url,
@@ -533,3 +535,71 @@ def plex_report(server: int, session_id: str, rating_key: str, state: str, posit
         _plex_server(server), _plex_client_id or "radiotimes", session_id, rating_key, state, position_s, duration_s
     )
     return _ok({"ok": ok}) if ok else _err(error or "report failed")
+
+
+def _video_label(media: dict) -> str | None:
+    """"1080p H264", "4K HEVC", "SD H264"."""
+    res = str(media.get("videoResolution") or "")
+    res = f"{res}p" if res.isdigit() else res.upper()
+    codec = str(media.get("videoCodec") or "").upper()
+    return " ".join(x for x in (res, codec) if x) or None
+
+
+_SUBTITLE_MIME = {"srt": "application/x-subrip", "ass": "text/x-ssa", "ssa": "text/x-ssa", "vtt": "text/vtt"}
+
+
+def _plex_extras(creds: tv_plex.PlexCreds, rating_key: str) -> dict[str, Any]:
+    """What the details page shows beyond tvdinner's VodItem: runtime,
+    certificate, genres, cast, studio, air date, episode numbering, the
+    file's quality -- and Plex's sidecar subtitle files, which aren't in
+    the media file so the player must be told about them. One GET of the
+    item's metadata (the same endpoint tvdinner's resolve reads). Empty
+    on any failure: the details page just shows less."""
+    try:
+        r = requests.get(
+            f"{creds.base_url}/library/metadata/{rating_key}",
+            headers={"Accept": "application/json", "X-Plex-Token": creds.token},
+            timeout=10,
+        )
+        r.raise_for_status()
+        meta = ((r.json().get("MediaContainer") or {}).get("Metadata") or [{}])[0]
+    except Exception as exc:  # noqa: BLE001 -- cosmetic
+        sys.stderr.write(redact(f"plex details for {rating_key} unavailable: {exc}\n"))
+        return {}
+
+    def tags(key: str, limit: int = 8) -> list[str]:
+        return [str(t["tag"]) for t in (meta.get(key) or []) if isinstance(t, dict) and t.get("tag")][:limit]
+
+    media = (meta.get("Media") or [{}])[0] if isinstance(meta.get("Media"), list) else {}
+    parts = media.get("Part") or [] if isinstance(media, dict) else []
+    streams = [s for p in parts if isinstance(p, dict) for s in (p.get("Stream") or []) if isinstance(s, dict)]
+    sidecars = []
+    for st in streams:
+        if st.get("streamType") == 3 and st.get("key") and str(st.get("codec", "")).lower() in _SUBTITLE_MIME:
+            sidecars.append(
+                {
+                    "url": f"{creds.base_url}{st['key']}?X-Plex-Token={creds.token}",
+                    "mime": _SUBTITLE_MIME[str(st["codec"]).lower()],
+                    "language": st.get("languageTag") or st.get("languageCode"),
+                    "label": st.get("displayTitle") or st.get("language"),
+                }
+            )
+    audio = next((st for st in streams if st.get("streamType") == 2 and st.get("selected")), None) or next(
+        (st for st in streams if st.get("streamType") == 2), None
+    )
+    return {
+        "duration_ms": meta.get("duration") or media.get("duration"),
+        "content_rating": meta.get("contentRating"),
+        "originally_available": meta.get("originallyAvailableAt"),
+        "studio": meta.get("studio"),
+        "tagline": meta.get("tagline"),
+        "genres": tags("Genre", 4),
+        "cast": tags("Role", 6),
+        "writers": tags("Writer", 3),
+        "season": meta.get("parentIndex"),
+        "episode": meta.get("index"),
+        "video": _video_label(media),
+        "audio": audio.get("displayTitle") if audio else None,
+        "subtitles": [st.get("displayTitle") or st.get("language") for st in streams if st.get("streamType") == 3],
+        "sidecar_subtitles": sidecars,
+    }
