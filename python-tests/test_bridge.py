@@ -141,7 +141,8 @@ def test_load_channels(engine) -> None:
 def test_guide_uses_typed_host_not_url_tvg_header(engine) -> None:
     bridge.load_channels()
     guide = json.loads(bridge.load_guide())
-    assert guide == {"epg_channels": 2, "programmes": 3, "pre_corrected": True}
+    assert guide["loaded"] is True
+    assert (guide["epg_channels"], guide["programmes"], guide["pre_corrected"]) == (2, 3, True)
     # The fake asserts every request hit BASE; this checks the EPG was one.
     assert any("/api/exports/epg.xml" in u for u in engine)
 
@@ -205,23 +206,92 @@ def test_unreachable_server_is_an_error(monkeypatch, tmp_path) -> None:
     assert "error" in json.loads(bridge.favourites())
 
 
-def test_probe_reports_cold_and_warm(server, tmp_path) -> None:
-    report = json.loads(bridge.probe(URL, str(tmp_path)))
-    assert [s["step"] for s in report["steps"]] == ["configure", "channels", "guide_cold", "guide_warm"]
-    assert not any("error" in s for s in report["steps"])
-    assert report["channels"] == 3
-    assert report["guide"]["programmes"] == 3
-    assert report["epg_bytes"] == len(EPG.encode())
-    assert report["tvdinner"] == "1.46.4"
-    # Warm load is served from tvdinner's parsed cache: no second EPG fetch.
-    assert sum("/api/exports/epg.xml" in u for u in server) == 1
+def _epg_fetches(seen: list[str]) -> int:
+    return sum("/api/exports/epg.xml" in u for u in seen)
 
 
-def test_probe_stops_at_first_failure(monkeypatch, tmp_path) -> None:
+def test_guide_network_load_reports_timing_split(engine) -> None:
+    bridge.load_channels()
+    guide = json.loads(bridge.load_guide())
+    assert guide["source"] == "network"
+    assert guide["bytes"] == len(EPG.encode())
+    assert guide["download_s"] >= 0 and guide["parse_s"] >= 0
+    assert guide["download_s"] + guide["parse_s"] <= guide["total_s"] + 0.01
+    assert guide["updated"] > 0
+    assert guide["network_failed"] is False
+
+
+def test_cached_mode_never_touches_the_network(engine) -> None:
+    bridge.load_channels()
+    assert json.loads(bridge.load_guide("cached")) == {"loaded": False}
+    assert _epg_fetches(engine) == 0
+    bridge.load_guide()
+    guide = json.loads(bridge.load_guide("cached"))
+    assert guide["loaded"] is True and guide["source"] == "cache"
+    assert "download_s" not in guide
+    assert _epg_fetches(engine) == 1
+
+
+def test_cached_mode_accepts_a_stale_copy(engine, tmp_path) -> None:
+    import os
+
+    bridge.load_channels()
+    bridge.load_guide()
+    week_ago = __import__("time").time() - 7 * 86400
+    for f in (tmp_path / "epg").iterdir():
+        os.utime(f, (week_ago, week_ago))
+    guide = json.loads(bridge.load_guide("cached"))
+    assert guide["loaded"] is True and guide["source"] == "cache"
+    assert _epg_fetches(engine) == 1
+
+
+def test_refresh_mode_always_fetches(engine) -> None:
+    bridge.load_channels()
+    bridge.load_guide()
+    guide = json.loads(bridge.load_guide("refresh"))
+    assert guide["source"] == "network"
+    assert _epg_fetches(engine) == 2
+
+
+def test_refresh_falls_back_to_stale_copy_when_offline(engine, monkeypatch) -> None:
+    bridge.load_channels()
+    bridge.load_guide()
+
     def down(*args: object, **kwargs: object) -> None:
         raise requests.ConnectionError("refused")
 
     monkeypatch.setattr(requests, "get", down)
-    report = json.loads(bridge.probe(URL, str(tmp_path)))
-    assert report["steps"][-1]["step"] == "channels"
-    assert "error" in report["steps"][-1]
+    guide = json.loads(bridge.load_guide("refresh"))
+    assert guide["loaded"] is True
+    assert guide["network_failed"] is True
+    assert guide["programmes"] == 3
+
+
+def test_unknown_guide_mode_is_an_error(engine) -> None:
+    bridge.load_channels()
+    assert "error" in json.loads(bridge.load_guide("sideways"))
+
+
+def test_token_never_reaches_stderr_or_errors(monkeypatch, tmp_path, capfd) -> None:
+    def down(url: str, *args: object, **kwargs: object) -> None:
+        raise requests.ConnectionError(f"refused for {url}")
+
+    monkeypatch.setattr(requests, "get", down)
+    bridge.configure(URL, str(tmp_path))
+    out = bridge.load_channels() + bridge.favourites()
+    captured = capfd.readouterr()
+    assert TOKEN not in out
+    assert TOKEN not in captured.err
+    assert "token=…" in captured.err  # the warning still says which URL
+
+
+def test_guarded_tracebacks_are_redacted(monkeypatch, tmp_path, capfd) -> None:
+    bridge.configure(URL, str(tmp_path))
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError(f"unexpected at {BASE}/api/exports/epg.xml?token={TOKEN}")
+
+    monkeypatch.setattr(bridge, "load_playlist", boom)
+    result = json.loads(bridge.load_channels())
+    assert TOKEN not in result["error"]
+    assert TOKEN not in capfd.readouterr().err

@@ -30,16 +30,15 @@ process and the Kotlin side serialises every call onto one thread.
 from __future__ import annotations
 
 import json
-import platform
-import shutil
+import logging
+import re
 import sys
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from tvdinner import __version__ as TVDINNER_VERSION
 from tvdinner import epg as tv_epg
 from tvdinner.m3u import Channel, Playlist, load_playlist
 from tvdinner.tvtimes import (
@@ -50,6 +49,47 @@ from tvdinner.tvtimes import (
     tvtimes_epg_url,
     tvtimes_playlist_url,
 )
+
+_TOKEN_RE = re.compile(r"(token=)[^&\s'\":]+")
+
+
+def redact(text: str) -> str:
+    """Mask `token=` values. tvtimes stream, playlist and EPG URLs all carry
+    the export token, and tvdinner's own warnings and requests' exception
+    messages quote those URLs verbatim."""
+    return _TOKEN_RE.sub(r"\1…", text)
+
+
+class _CurrentStderrHandler(logging.StreamHandler):
+    """Writes to whatever sys.stderr is now, not the one at import time."""
+
+    @property  # type: ignore[override]
+    def stream(self):  # noqa: ANN201
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, _value: object) -> None:
+        pass
+
+
+class _RedactingFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(super().format(record))
+
+
+def _install_log_redaction() -> None:
+    # tvdinner logs through `logging` with no handler configured, so its
+    # warnings would go out via logging.lastResort -- unredacted, to stderr,
+    # which Chaquopy forwards to logcat, which users paste into bug reports.
+    root = logging.getLogger()
+    if not any(isinstance(h.formatter, _RedactingFormatter) for h in root.handlers):
+        handler = _CurrentStderrHandler()
+        handler.setFormatter(_RedactingFormatter("%(name)s: %(message)s"))
+        root.addHandler(handler)
+        root.setLevel(logging.WARNING)
+
+
+_install_log_redaction()
 
 _feed: TvtimesFeed | None = None
 _cache_dir: Path | None = None
@@ -66,7 +106,7 @@ def _ok(payload: Any) -> str:
 
 
 def _err(message: str) -> str:
-    return json.dumps({"error": message})
+    return json.dumps({"error": redact(message)})
 
 
 def _guarded(fn: Callable[..., str]) -> Callable[..., str]:
@@ -81,8 +121,8 @@ def _guarded(fn: Callable[..., str]) -> Callable[..., str]:
         try:
             return fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 -- the whole point
-            traceback.print_exc(file=sys.stderr)
-            return _err(f"{type(exc).__name__}: {exc}")
+            sys.stderr.write(redact(traceback.format_exc()))
+            return _err(redact(f"{type(exc).__name__}: {exc}"))
 
     wrapper.__name__ = fn.__name__
     wrapper.__doc__ = fn.__doc__
@@ -91,6 +131,16 @@ def _guarded(fn: Callable[..., str]) -> Callable[..., str]:
 
 def _ms(moment: datetime) -> int:
     return int(moment.timestamp() * 1000)
+
+
+def _max_rss_kb() -> int | None:
+    try:
+        import resource
+
+        # Kilobytes on Linux, which is what Android is.
+        return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except Exception:  # noqa: BLE001 -- informational only
+        return None
 
 
 def _epg_cache_dir() -> Path | None:
@@ -176,9 +226,37 @@ def load_channels() -> str:
     return _ok([_channel_json(c) for c in playlist.channels])
 
 
+# How load_guide's modes map onto tvdinner's cache age. "cached" takes any
+# copy on disk however old -- a day-old guide still has tonight in it, and
+# showing it at once beats a blank screen for the ~15 s a Fire TV Stick
+# needs to fetch and parse a fresh one. "refresh" forces the network.
+_GUIDE_MAX_AGE = {
+    "auto": tv_epg.DEFAULT_EPG_CACHE_MAX_AGE,
+    "cached": timedelta(days=3650),
+    "refresh": timedelta(0),
+}
+
+
+def _guide_cache_file() -> Path | None:
+    epg_dir = _epg_cache_dir()
+    if epg_dir is None or _feed is None:
+        return None
+    return tv_epg.cache_path_for(epg_dir, tvtimes_epg_url(_feed))
+
+
 @_guarded
-def load_guide() -> str:
+def load_guide(mode: str = "auto") -> str:
     """Fetch and parse the XMLTV guide for the loaded line-up.
+
+    `mode` is "auto" (tvdinner's normal 24 h cache), "cached" (whatever is
+    on disk, however old, and never the network: `{"loaded": false}` if
+    there is nothing) or "refresh" (always the network; tvdinner falls back
+    to the stale copy if that fails, reported as `network_failed`).
+
+    The result carries where the guide came from and how long each part
+    took, measured through tvdinner's public download-progress callback:
+    `download_s` runs to the last byte received, `parse_s` from there to the
+    end (parse plus writing tvdinner's parsed cache).
 
     Uses tvtimes' EPG URL derived from the link the user typed, not the
     playlist's `url-tvg=` header, for the reason tvdinner's tvtimes module
@@ -189,17 +267,47 @@ def load_guide() -> str:
     feed = _require_feed()
     if _playlist is None:
         return _err("Load channels before the guide")
-    epg = tv_epg.load_epg_for_playlist(_playlist, override=tvtimes_epg_url(feed), cache_dir=_epg_cache_dir())
+    if mode not in _GUIDE_MAX_AGE:
+        return _err(f"Unknown guide mode {mode!r}")
+    raw = _guide_cache_file()
+    if mode == "cached" and (raw is None or not raw.is_file()):
+        return _ok({"loaded": False})
+
+    received = {"bytes": 0, "at": None}
+
+    def on_progress(done: int, _total: int | None) -> None:
+        received["bytes"] = done
+        received["at"] = time.monotonic()
+
+    started = time.monotonic()
+    epg = tv_epg.load_epg_for_playlist(
+        _playlist,
+        override=tvtimes_epg_url(feed),
+        cache_dir=_epg_cache_dir(),
+        max_age=_GUIDE_MAX_AGE[mode],
+        on_progress=on_progress,
+    )
+    finished = time.monotonic()
     if epg is None:
         return _err(f"Could not load the guide from {feed.base_url}")
     _epg = epg
-    return _ok(
-        {
-            "epg_channels": len(epg.channels),
-            "programmes": sum(len(p) for p in epg.programmes.values()),
-            "pre_corrected": epg.times_already_corrected,
-        }
-    )
+    fetched = received["at"] is not None
+    result: dict[str, Any] = {
+        "loaded": True,
+        "epg_channels": len(epg.channels),
+        "programmes": sum(len(p) for p in epg.programmes.values()),
+        "pre_corrected": epg.times_already_corrected,
+        "source": "network" if fetched else "cache",
+        "network_failed": mode == "refresh" and not fetched,
+        "total_s": round(finished - started, 2),
+        "rss_kb": _max_rss_kb(),
+        "updated": _ms(datetime.fromtimestamp(raw.stat().st_mtime, tz=timezone.utc)) if raw and raw.is_file() else None,
+    }
+    if fetched:
+        result["bytes"] = received["bytes"]
+        result["download_s"] = round(received["at"] - started, 2)
+        result["parse_s"] = round(finished - received["at"], 2)
+    return _ok(result)
 
 
 @_guarded
@@ -267,88 +375,3 @@ def watchlist() -> str:
             for e in entries
         ]
     )
-
-
-# --------------------------------------------------------------------------
-# Phase 0 probe
-
-
-def _max_rss_kb() -> int | None:
-    try:
-        import resource
-
-        # Kilobytes on Linux, which is what Android is.
-        return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-    except Exception:  # noqa: BLE001 -- informational only
-        return None
-
-
-@_guarded
-def probe(tvtimes_url: str, cache_dir: str) -> str:
-    """Measure what matters before building a UI on this engine.
-
-    The question Phase 0 exists to answer is whether tvdinner's pure-Python
-    XMLTV parse is tolerable on a Fire TV Stick. So this times a cold load
-    (cache wiped, network fetch and full parse), then a warm one (tvdinner's
-    parsed-EPG pickle cache), and records peak memory and feed size. A
-    handful of now/next samples confirm the guide actually lines up with
-    the channels rather than parsing to nothing.
-    """
-    report: dict[str, Any] = {
-        "python": sys.version.split()[0],
-        "machine": platform.machine(),
-        "tvdinner": TVDINNER_VERSION,
-        "rss_start_kb": _max_rss_kb(),
-    }
-    steps: list[dict[str, Any]] = []
-    report["steps"] = steps
-
-    def step(name: str, fn: Callable[[], str]) -> dict[str, Any] | list[Any] | None:
-        started = time.monotonic()
-        result = json.loads(fn())
-        entry: dict[str, Any] = {"step": name, "seconds": round(time.monotonic() - started, 2), "rss_kb": _max_rss_kb()}
-        if isinstance(result, dict) and "error" in result:
-            entry["error"] = result["error"]
-            steps.append(entry)
-            return None
-        steps.append(entry)
-        return result
-
-    if step("configure", lambda: configure(tvtimes_url, cache_dir)) is None:
-        return _ok(report)
-
-    epg_dir = _epg_cache_dir()
-    if epg_dir is not None:
-        shutil.rmtree(epg_dir, ignore_errors=True)
-
-    channels = step("channels", load_channels)
-    if channels is None:
-        return _ok(report)
-    report["channels"] = len(channels)
-    report["first_channel"] = channels[0] if channels else None
-
-    cold = step("guide_cold", load_guide)
-    if cold is None:
-        return _ok(report)
-    report["guide"] = cold
-
-    if epg_dir is not None:
-        raw = tv_epg.cache_path_for(epg_dir, tvtimes_epg_url(_require_feed()))
-        report["epg_bytes"] = raw.stat().st_size if raw.is_file() else None
-
-    global _epg
-    _epg = None
-    step("guide_warm", load_guide)
-
-    started = time.monotonic()
-    nn = json.loads(now_next())
-    report["now_next_seconds"] = round(time.monotonic() - started, 3)
-    report["channels_with_guide"] = len(nn)
-
-    def now_title(url: str) -> str | None:
-        entry = nn.get(url)
-        return entry["now"]["title"] if entry and entry["now"] else None
-
-    report["samples"] = [{"channel": c["name"], "now": now_title(c["url"])} for c in channels[:5]]
-    report["rss_end_kb"] = _max_rss_kb()
-    return _ok(report)

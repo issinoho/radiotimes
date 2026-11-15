@@ -11,17 +11,31 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   XMLTV parsing and caching, now/next, and the tvtimes feeds.
 - **The app** adds a 10-foot interface and plays streams with Media3/ExoPlayer.
 
-## Status: Phase 0 — engine probe
+## Status: Phase 1 — live TV
 
-This build is not the app yet; it's a measurement. It answers two questions on
-real hardware before any interface work starts:
+- **Setup:** enter the tvtimes link once (or send it from a computer, below).
+- **Channel list:** groups down the left, channels with logo and what's on
+  now, details of the focused channel on the right. The guide shows at once
+  from cache and refreshes in the background when it's over 6 hours old.
+- **Player:** fullscreen live TV with a now/next banner.
 
-1. Is tvdinner's Python XMLTV parse fast enough on a Fire TV Stick, cold and
-   from its cache?
-2. Does ExoPlayer on the Stick play what tvtimes hands it?
+Phase 0 measured the engine on a Fire TV Stick (Fire OS 8, 32-bit ARM):
+channel list 0.4 s, guide from cache 0.4 s, fresh guide ~15 s for an 11.6 MB
+XMLTV feed, first frame 2.1 s.
 
-Roadmap: 0 probe → 1 live TV (setup, channels, player) → 2 guide grid →
+Roadmap: 0 probe ✓ → **1 live TV** → 2 guide grid →
 3 tvtimes sync (favourites, watchlist, watch reporting) → 4 polish.
+
+### Remote
+
+| Where | Key | Does |
+|---|---|---|
+| Channel list | ↑ ↓ ← → | move between groups and channels |
+| | OK | play |
+| | ☰ (menu) | change the tvtimes link |
+| Player | ↑ / ↓, CH+ / CH− | next / previous channel in the group |
+| | OK | show or hide what's on |
+| | Back | back to the list |
 
 ## Install on a Fire TV Stick
 
@@ -38,17 +52,18 @@ Roadmap: 0 probe → 1 live TV (setup, channels, player) → 2 guide grid →
    adb install -r app-debug.apk
    ```
 
-4. Run the probe with your tvtimes link (Settings → Export feeds in tvtimes),
-   which saves typing it with the remote:
+4. Open radiotimes from *Your Apps & Channels*. Typing the token with the
+   remote is slow, so you can send your tvtimes link (Settings → Export
+   feeds in tvtimes) from the computer instead, whether or not the app is
+   already open:
 
    ```sh
    adb shell am start -n com.issinoho.radiotimes/.MainActivity \
-     --es url 'tvtimess://your-host?token=YOUR_TOKEN' --ez autorun true
-   adb logcat -s radiotimes python.stderr
+     --es url 'tvtimess://your-host?token=YOUR_TOKEN'
    ```
 
-   Then press **Play** to try the first channel; the `play |` lines in logcat
-   give the time to first frame and the decoded format.
+   For a bug report, `adb logcat -s radiotimes python.stderr` shows the
+   guide timings (`guide |`) and stream start-up (`play |`).
 
 Tokens are masked in everything the app logs or shows.
 
@@ -65,3 +80,6 @@ PYTHONPATH=app/src/main/python:vendor/tvdinner/src python -m pytest -q python-te
 # APK (needs the Android SDK, JDK 17 and Python 3.11 on PATH)
 ./gradlew assembleDebug
 ```
+
+To try it without a real tvtimes, run `python3 tools/fake_tvtimes.py` and
+point an Android TV emulator at it (instructions in the file).

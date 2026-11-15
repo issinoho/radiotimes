@@ -12,10 +12,15 @@ PYTHONPATH=app/src/main/python:vendor/tvdinner/src python -m pytest -q python-te
 ./gradlew assembleDebug
 ```
 
-The Claude Code cloud container cannot reach Google's Maven repo, so the
-APK is built only by GitHub Actions (`.github/workflows/build.yml`).
-Push and read the job log; don't claim a Kotlin change compiles until CI
-says so. The bridge tests do run locally.
+The Claude Code cloud container cannot reach Google's Maven repo, so there
+the APK is built only by GitHub Actions (`.github/workflows/build.yml`):
+push and read the job log, and don't claim a Kotlin change compiles until
+CI says so. On a machine with the Android SDK and JDK 17 it builds locally,
+and `tools/fake_tvtimes.py` plus an Android TV emulator (API 36 TV image is
+x86 with ARM translation, so it runs the armeabi-v7a build like older
+Sticks) lets UI changes be driven with `adb shell input keyevent` and
+checked with `adb exec-out screencap -p`. The user's installs still come
+from CI.
 
 ## Hard rules
 
@@ -36,7 +41,9 @@ says so. The bridge tests do run locally.
 - **Channels are keyed by stream URL**, never tvg-id (tvdinner's rule, and
   tvtimes' watchlist feed matches by URL).
 - **Never log or display a token or upstream stream URL.** Use
-  `redactTokens()` and `StreamResolver.redact()`. Xtream upstream URLs
+  `redactTokens()` and `StreamResolver.redact()` in Kotlin; bridge.py
+  redacts its errors, tracebacks and tvdinner's `logging` output (which
+  quotes URLs verbatim and reaches logcat via stderr). Xtream upstream URLs
   carry provider credentials in the path.
 - **No tvtimes changes are assumed.** The app uses only `/api/exports/*`.
 
@@ -52,6 +59,14 @@ says so. The bridge tests do run locally.
   the redirect first, stopping as soon as an extension settles the type
   (IPTV providers often allow one connection per account).
 - Vega OS Fire TV devices can't run APKs; out of scope.
+
+## UI notes
+
+- 1080p at TV density is only 960dp wide: budget columns against that.
+- Don't use Compose's `focusRestorer` on lazy lists (Compose 1.7 crashes
+  with "Release should only be called once"); use `focusProperties { enter }`.
+- Never start focus on a text field: selecting it opens Fire TV's
+  full-screen keyboard, which Back doesn't reliably dismiss.
 
 ## Device testing
 

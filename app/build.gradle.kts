@@ -14,8 +14,8 @@ android {
         // Fire OS 7 is Android 9 (API 28); Fire OS 8 is Android 11.
         minSdk = 28
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-spike"
+        versionCode = 2
+        versionName = "0.2.0-dev"
 
         ndk {
             // Older Fire TV Sticks are 32-bit ARM, newer ones 64-bit; x86_64
@@ -76,6 +76,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // Channel logos (tvtimes passes through the provider's logo URLs).
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     val media3 = "1.5.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
