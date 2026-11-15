@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,7 +97,8 @@ fun ChannelsScreen(
 ) {
     val now = rememberNow()
     Column(Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 24.dp)) {
-        Header(guide, lineup, now)
+        val update by Updates.available.collectAsState()
+        Header(guide, lineup, now, update)
         Spacer(Modifier.height(12.dp))
         when (lineup) {
             Tv.Lineup.Idle, Tv.Lineup.Loading -> Centred { Text("Connecting to tvtimes…", color = Palette.dim, fontSize = 20.sp) }
@@ -123,7 +125,7 @@ private fun Centred(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Header(guide: Tv.Guide, lineup: Tv.Lineup, now: Long) {
+private fun Header(guide: Tv.Guide, lineup: Tv.Lineup, now: Long, update: String?) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Text("radiotimes", color = Palette.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(24.dp))
@@ -140,6 +142,10 @@ private fun Header(guide: Tv.Guide, lineup: Tv.Lineup, now: Long) {
             }
         }
         Spacer(Modifier.weight(1f))
+        if (update != null) {
+            Text("Update $update available · Downloader code ${Updates.DOWNLOADER_CODE}", color = Palette.accent, fontSize = 14.sp, maxLines = 1)
+            Spacer(Modifier.width(20.dp))
+        }
         Text("☰ guide", color = Palette.dim, fontSize = 13.sp)
         Spacer(Modifier.width(20.dp))
         Text(clockText(now), color = Palette.text, fontSize = 22.sp)

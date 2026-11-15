@@ -24,6 +24,10 @@
   channel you were watching before (the remote's Last key too, where it
   has one); the banner shows "◀ back to …". Channels raced past while
   zapping don't count.
+- **Update notice**: when a newer radiotimes is released, the channel
+  list's header says "Update X available · Downloader code 8716486".
+  It checks GitHub at most every 12 hours; the update itself is still
+  done through Downloader.
 
 ## 0.5.1
 

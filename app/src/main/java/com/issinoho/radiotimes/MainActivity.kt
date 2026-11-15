@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Tv.init(this)
+        Updates.check(this)
         Plex.configure(Prefs.plexLinks(this), filesDir.absolutePath)
         if (!acceptLinkFrom(intent)) {
             val saved = Prefs.tvtimesUrl(this)
@@ -133,6 +134,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The app can sit open for days on a TV; look again (at most every 12 h).
+        Updates.check(this)
     }
 
     override fun onNewIntent(intent: Intent) {
