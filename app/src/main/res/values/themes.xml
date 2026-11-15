@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Platform themes only: Compose draws everything, so AppCompat would
+         be a dependency for nothing. -->
+    <style name="Theme.Radiotimes" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+    <style name="Theme.Radiotimes.Fullscreen" parent="Theme.Radiotimes">
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

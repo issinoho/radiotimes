@@ -1,0 +1,3 @@
+[submodule "vendor/tvdinner"]
+	path = vendor/tvdinner
+	url = https://github.com/issinoho/tvdinner
