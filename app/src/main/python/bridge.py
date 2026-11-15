@@ -609,6 +609,62 @@ def _video_label(media: dict) -> str | None:
 
 
 @_guarded
+def plex_transcode_url(server: int, rating_key: str, session: str) -> str:
+    """For a file this device can't decode: Plex's universal transcoder as
+    HLS (H.264/AAC), the way Plex's own apps fall back. `{"url"}` -- the
+    master playlist, token included (the session's own segment URLs need
+    none). Identifies as the Chrome platform, whose built-in client profile
+    makes Plex convert anything a browser can't play; the playlist covers
+    the whole item (Plex converts segments on demand), so the player seeks
+    in it normally. Not in tvdinner."""
+    creds = _plex_server(server)
+    params = {
+        "path": f"/library/metadata/{rating_key}",
+        "mediaIndex": "0",
+        "partIndex": "0",
+        "protocol": "hls",
+        "fastSeek": "1",
+        "copyts": "1",
+        "offset": "0",
+        "directPlay": "0",
+        "directStream": "1",
+        "videoQuality": "100",
+        "videoResolution": "1920x1080",
+        "maxVideoBitrate": "8000",
+        "session": session,
+        "X-Plex-Session-Identifier": session,
+        "X-Plex-Platform": "Chrome",
+        "X-Plex-Product": "radiotimes",
+        "X-Plex-Client-Identifier": _plex_client_id or "radiotimes",
+        "X-Plex-Token": creds.token,
+    }
+    query = urllib.parse.urlencode(params)
+    # Plex answers start.m3u8 with 400 for a session it hasn't made a
+    # decision for: ask for the decision first, as its own clients do.
+    r = requests.get(
+        f"{creds.base_url}/video/:/transcode/universal/decision?{query}",
+        headers={"Accept": "application/json"},
+        timeout=20,
+    )
+    r.raise_for_status()
+    return _ok({"url": f"{creds.base_url}/video/:/transcode/universal/start.m3u8?{query}"})
+
+
+@_guarded
+def plex_transcode_stop(server: int, session: str) -> str:
+    """End a transcode session so the server stops converting."""
+    creds = _plex_server(server)
+    r = requests.get(
+        f"{creds.base_url}/video/:/transcode/universal/stop",
+        params={"session": session},
+        headers={"X-Plex-Token": creds.token},
+        timeout=10,
+    )
+    r.raise_for_status()
+    return _ok({"ok": True})
+
+
+@_guarded
 def plex_subtitle_search(server: int, rating_key: str, language: str) -> str:
     """Online subtitles for an item, from the Plex server's own subtitle
     search (its built-in OpenSubtitles provider -- what Plex's apps call

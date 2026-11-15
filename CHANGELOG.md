@@ -10,6 +10,12 @@
   picture just froze), no progress for 20 s, and falling behind a live
   window (rejoins live). Formats the device can't decode still fail at
   once, since retrying can't help.
+- **Plex files the device can't decode play anyway.** If the TV can't
+  decode a file as it is (an HEVC/10-bit video, an audio format it lacks),
+  radiotimes switches to a version converted on the fly by your Plex
+  server (H.264/AAC), at the same position, with seeking, resume and
+  subtitles working as before. The server stops converting when you
+  leave.
 
 ## 0.5.1
 

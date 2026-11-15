@@ -577,3 +577,37 @@ def test_plex_subtitle_search_failure_is_an_error(plex, monkeypatch) -> None:
     monkeypatch.setattr(requests, "get", down)
     out = bridge.plex_subtitle_search(0, "10", "en")
     assert "error" in json.loads(out) and PLEX_TOKEN not in out
+
+
+
+def test_plex_transcode_url_and_stop(plex, monkeypatch) -> None:
+    import urllib.parse as up
+
+    decisions: list[str] = []
+    real_get = requests.get
+
+    def get_decision(u: str, *args: object, **kwargs: object):
+        if "/video/:/transcode/universal/decision?" in u:
+            decisions.append(u)
+            return _FakeResponse({"MediaContainer": {"generalDecisionCode": 1001}})
+        return real_get(u, *args, **kwargs)
+
+    monkeypatch.setattr(requests, "get", get_decision)
+    url = json.loads(bridge.plex_transcode_url(0, "10", "sess-1"))["url"]
+    # The decision request comes first, with the same parameters.
+    assert len(decisions) == 1 and decisions[0].split("?", 1)[1] == url.split("?", 1)[1]
+    parts = up.urlsplit(url)
+    assert f"{parts.scheme}://{parts.netloc}{parts.path}" == f"{PLEX}/video/:/transcode/universal/start.m3u8"
+    q = dict(up.parse_qsl(parts.query))
+    assert q["path"] == "/library/metadata/10" and q["protocol"] == "hls" and q["session"] == "sess-1"
+    assert q["X-Plex-Platform"] == "Chrome" and q["X-Plex-Token"] == PLEX_TOKEN
+
+    seen: list[tuple[str, dict]] = []
+
+    def get(u: str, *args: object, **kwargs: object):
+        seen.append((u, dict(kwargs.get("params") or {})))
+        return _FakeResponse({})
+
+    monkeypatch.setattr(requests, "get", get)
+    assert json.loads(bridge.plex_transcode_stop(0, "sess-1")) == {"ok": True}
+    assert seen == [(f"{PLEX}/video/:/transcode/universal/stop", {"session": "sess-1"})]

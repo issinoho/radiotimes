@@ -81,6 +81,9 @@ class VodPlayerActivity : ComponentActivity() {
     private var reportJob: Job? = null
     private var started = 0L
     private var firstFrameLogged = false
+    /** Set while playing Plex's converted (transcoded) stream instead of the file. */
+    private var transcodeSession: String? = null
+    private var transcodeUrl: String? = null
     private val notice = mutableStateOf<String?>(null)
     private var noticeJob: Job? = null
     /** What's playing, for the info banner (OK) and details panel (☰). */
@@ -242,7 +245,12 @@ class VodPlayerActivity : ComponentActivity() {
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "vod | ${item.title}: ${error.errorCodeName}: ${redactTokens(error.message.orEmpty())}")
-                showNotice("Can't play this: ${error.errorCodeName}", sticky = true)
+                // The device can't decode the file as it is: have Plex convert it.
+                if (transcodeSession == null && error.errorCode in UNDECODABLE) {
+                    startTranscode(error.errorCodeName)
+                } else {
+                    showNotice("Can't play this: ${error.errorCodeName}", sticky = true)
+                }
             }
         })
         player = exo
@@ -294,12 +302,14 @@ class VodPlayerActivity : ComponentActivity() {
         reportJob?.cancel()
         markerJob?.cancel()
         report("stopped")
+        stopTranscode()
         view?.player = null
         player?.release()
         player = null
     }
 
     private fun load(next: Item) {
+        stopTranscode()
         item = next
         session = UUID.randomUUID().toString()
         started = SystemClock.elapsedRealtime()
@@ -327,7 +337,48 @@ class VodPlayerActivity : ComponentActivity() {
                 .setSelectionFlags(if (sc.url == selected) C.SELECTION_FLAG_DEFAULT else 0)
                 .build()
         }
-        return MediaItem.Builder().setUri(it.url).setSubtitleConfigurations(subtitles).build()
+        val converted = transcodeUrl
+        return MediaItem.Builder()
+            .setUri(converted ?: it.url)
+            .apply { if (converted != null) setMimeType(androidx.media3.common.MimeTypes.APPLICATION_M3U8) }
+            .setSubtitleConfigurations(subtitles)
+            .build()
+    }
+
+    /**
+     * Switch to Plex's universal transcoder (HLS, H.264/AAC) at the current
+     * position. Its playlist covers the whole item, so positions, seeking,
+     * progress reports and sidecar subtitles all stay as they were.
+     */
+    private fun startTranscode(why: String) {
+        val exo = player ?: return
+        val position = exo.currentPosition.takeIf { it > 0 }
+            ?: item.resumeSeconds?.takeIf { it > 30 }?.let { (it * 1000).toLong() } ?: 0L
+        val session = UUID.randomUUID().toString()
+        transcodeSession = session
+        showNotice("This file needs converting for your TV. Plex is converting it…", sticky = true)
+        Log.i(TAG, "vod | ${item.title}: device can't decode ($why) -> Plex transcode")
+        lifecycleScope.launch {
+            val json = Engine.callPlex("plex_transcode_url", server, item.ratingKey, session)
+            bridgeError(json)?.let {
+                showNotice("Can't play this here, and Plex couldn't convert it: ${redactTokens(it)}", sticky = true)
+                return@launch
+            }
+            transcodeUrl = org.json.JSONObject(json).getString("url")
+            val p = player ?: return@launch
+            started = SystemClock.elapsedRealtime()
+            firstFrameLogged = false
+            p.setMediaItem(mediaItem(item, selected = null), position)
+            p.prepare()
+            p.playWhenReady = true
+            showNotice("Playing a version converted by Plex")
+        }
+    }
+
+    private fun stopTranscode() {
+        transcodeSession?.let { Plex.stopTranscode(server, it) }
+        transcodeSession = null
+        transcodeUrl = null
     }
 
     /** ☰ panel: subtitles off, or back on (a track in the device's language, else any). */
@@ -522,6 +573,17 @@ class VodPlayerActivity : ComponentActivity() {
         private const val EXTRA_SERVER = "server"
         private const val EXTRA_ITEM = "item"
         private const val EXTRA_FROM_START = "from_start"
+
+        /** Errors meaning the device can't decode the file itself (so Plex should convert it). */
+        private val UNDECODABLE = setOf(
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+        )
 
         fun intent(context: Context, server: Int, resolvedJson: String, fromStart: Boolean = false): Intent =
             Intent(context, VodPlayerActivity::class.java)

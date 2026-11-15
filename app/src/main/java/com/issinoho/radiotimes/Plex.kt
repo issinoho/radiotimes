@@ -67,6 +67,18 @@ object Plex {
     val servers: StateFlow<List<PlexServer>> = _servers.asStateFlow()
     private var configuredWith: List<String>? = null
 
+    /**
+     * End a server-side transcode. Process-wide scope: it must still go out
+     * while the player activity is being torn down.
+     */
+    fun stopTranscode(server: Int, session: String) {
+        scope.launch {
+            bridgeError(Engine.callPlex("plex_transcode_stop", server, session))?.let {
+                Log.w(TAG, "plex | couldn't stop transcode: ${redactTokens(it)}")
+            }
+        }
+    }
+
     fun configure(links: List<String>, filesDir: String) {
         if (links == configuredWith) return
         configuredWith = links
