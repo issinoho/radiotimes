@@ -16,6 +16,10 @@
   server (H.264/AAC), at the same position, with seeking, resume and
   subtitles working as before. The server stops converting when you
   leave.
+- **tvtimes favourites and watchlist**: a "★ Favourites" group with the
+  channels starred on your tvtimes account, and a "Watchlist" group with
+  the upcoming airings flagged there ("Today 21:00 · Title"), soonest
+  first. OK tunes the channel. Refreshed every 15 minutes.
 
 ## 0.5.1
 

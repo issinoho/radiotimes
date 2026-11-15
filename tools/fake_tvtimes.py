@@ -18,6 +18,7 @@ stream you run (and kill, and restart) yourself:
       -f mpegts -listen 1 http://127.0.0.1:8900/live.ts
 """
 import datetime as dt
+import json
 import http.server
 import random
 import sys
@@ -63,6 +64,25 @@ def epg():
     out.append("</tv>")
     return "\n".join(out)
 
+def favourites():
+    return json.dumps([{"channel_name": n} for n in ("News 01", "Sport 03", "Kids 04")])
+
+
+def watchlist():
+    soon = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0) + dt.timedelta(minutes=30)
+    rows = []
+    for i, offset in ((2, 0), (6, 120)):
+        start = soon + dt.timedelta(minutes=offset)
+        rows.append({
+            "channel_url": f"{HOST}/api/exports/stream/{i}?token={TOKEN}",
+            "channel_name": CH[i - 1][1],
+            "title": "Watchlisted Film" if i == 2 else "Watchlisted Match",
+            "start": start.isoformat(),
+            "stop": (start + dt.timedelta(minutes=90)).isoformat(),
+        })
+    return json.dumps(rows)
+
+
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -75,8 +95,10 @@ class H(http.server.BaseHTTPRequestHandler):
         elif path.startswith("/api/exports/stream/"):
             target = TS if TS_CHANNEL is not None and path.endswith(f"/{TS_CHANNEL}") else HLS
             self.send_response(302); self.send_header("Location", target); self.end_headers(); return
-        elif path in ("/api/exports/favourites.json", "/api/exports/watchlist.json"):
-            body, ct = b"[]", "application/json"
+        elif path == "/api/exports/favourites.json":
+            body, ct = favourites().encode(), "application/json"
+        elif path == "/api/exports/watchlist.json":
+            body, ct = watchlist().encode(), "application/json"
         else:
             return self.send_error(404)
         self.send_response(200); self.send_header("Content-Type", ct); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)

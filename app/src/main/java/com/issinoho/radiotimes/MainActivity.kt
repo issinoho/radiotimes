@@ -112,11 +112,15 @@ class MainActivity : ComponentActivity() {
                             val nowNext by Tv.nowNext.collectAsState()
                             val lastPlayed by Tv.lastPlayed.collectAsState()
                             val plexServers by Plex.servers.collectAsState()
+                            val favourites by Tv.favourites.collectAsState()
+                            val watchlist by Tv.watchlist.collectAsState()
                             ChannelsScreen(
                                 lineup = lineup,
                                 guide = guide,
                                 nowNext = nowNext,
                                 lastPlayed = lastPlayed,
+                                favourites = favourites,
+                                watchlist = watchlist,
                                 onPlay = { channel, list -> play(channel, list) },
                                 onFocusChannel = { channel, list -> focusedChannel = channel to list },
                                 plexServers = plexServers,

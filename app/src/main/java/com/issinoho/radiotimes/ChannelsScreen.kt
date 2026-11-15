@@ -43,13 +43,41 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 private const val ALL = "All channels"
+private const val FAVOURITES = "★ Favourites"
+private const val WATCHLIST = "Watchlist"
 
-/** Groups in tvtimes' order of first appearance, after "All channels". */
-private fun groupsOf(channels: List<Channel>): List<String> =
-    listOf(ALL) + channels.mapNotNull { it.group }.distinct()
+/** A row of the channel list; `note` replaces the now-playing line (watchlist airings). */
+private data class ListRow(val channel: Channel, val note: String?, val key: String)
 
-private fun channelsIn(channels: List<Channel>, group: String): List<Channel> =
-    if (group == ALL) channels else channels.filter { it.group == group }
+/** "All channels", tvtimes favourites and watchlist when there are any, then tvtimes' groups in order. */
+private fun groupsOf(channels: List<Channel>, hasFavourites: Boolean, hasWatchlist: Boolean): List<String> =
+    listOfNotNull(ALL, FAVOURITES.takeIf { hasFavourites }, WATCHLIST.takeIf { hasWatchlist }) +
+        channels.mapNotNull { it.group }.distinct()
+
+private fun norm(name: String) = name.trim().lowercase()
+
+private fun rowsIn(
+    channels: List<Channel>,
+    group: String,
+    favourites: Set<String>,
+    watchlist: List<WatchEntry>,
+    describe: (WatchEntry) -> String,
+): List<ListRow> = when (group) {
+    ALL -> channels.map { ListRow(it, null, it.url) }
+    FAVOURITES -> {
+        val names = favourites.map(::norm).toSet()
+        channels.filter { norm(it.name) in names }.map { ListRow(it, null, it.url) }
+    }
+    WATCHLIST -> {
+        val byUrl = channels.associateBy { it.url }
+        val byName = channels.associateBy { norm(it.name) }
+        watchlist.mapNotNull { e ->
+            val ch = byUrl[e.channelUrl] ?: byName[norm(e.channelName)] ?: return@mapNotNull null
+            ListRow(ch, describe(e), "${ch.url}@${e.start}")
+        }
+    }
+    else -> channels.filter { it.group == group }.map { ListRow(it, null, it.url) }
+}
 
 @Composable
 fun ChannelsScreen(
@@ -57,6 +85,8 @@ fun ChannelsScreen(
     guide: Tv.Guide,
     nowNext: Map<String, NowNext>,
     lastPlayed: String?,
+    favourites: Set<String>,
+    watchlist: List<WatchEntry>,
     onPlay: (Channel, List<Channel>) -> Unit,
     onFocusChannel: (Channel, List<Channel>) -> Unit,
     plexServers: List<PlexServer>,
@@ -82,7 +112,7 @@ fun ChannelsScreen(
                     LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
                 }
             }
-            is Tv.Lineup.Ready -> Lineup(lineup.channels, nowNext, lastPlayed, now, onPlay, onFocusChannel, plexServers, onPlex, onChangeLink)
+            is Tv.Lineup.Ready -> Lineup(lineup.channels, nowNext, lastPlayed, favourites, watchlist, now, onPlay, onFocusChannel, plexServers, onPlex, onChangeLink)
         }
     }
 }
@@ -122,6 +152,8 @@ private fun Lineup(
     channels: List<Channel>,
     nowNext: Map<String, NowNext>,
     lastPlayed: String?,
+    favourites: Set<String>,
+    watchlist: List<WatchEntry>,
     now: Long,
     onPlay: (Channel, List<Channel>) -> Unit,
     onFocusChannel: (Channel, List<Channel>) -> Unit,
@@ -129,17 +161,35 @@ private fun Lineup(
     onPlex: (PlexServer) -> Unit,
     onSettings: () -> Unit,
 ) {
-    val groups = remember(channels) { groupsOf(channels) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val describe = remember(context) {
+        val time = android.text.format.DateFormat.getTimeFormat(context)
+        val day = java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault())
+        val today = { ms: Long -> java.util.Calendar.getInstance().apply { timeInMillis = ms }.get(java.util.Calendar.DAY_OF_YEAR) }
+        { e: WatchEntry ->
+            val n = System.currentTimeMillis()
+            val `when` = when {
+                e.start <= n -> "On now"
+                today(e.start) == today(n) -> "Today ${time.format(java.util.Date(e.start))}"
+                today(e.start) == today(n + 86_400_000L) -> "Tomorrow ${time.format(java.util.Date(e.start))}"
+                else -> "${day.format(java.util.Date(e.start))} ${time.format(java.util.Date(e.start))}"
+            }
+            "$`when` · ${e.title}"
+        }
+    }
+    val groups = remember(channels, favourites, watchlist) { groupsOf(channels, favourites.isNotEmpty(), watchlist.isNotEmpty()) }
     var group by rememberSaveable { mutableStateOf(ALL) }
     if (group !in groups) group = ALL
-    val shown = remember(channels, group) { channelsIn(channels, group) }
+    val rows = remember(channels, group, favourites, watchlist) { rowsIn(channels, group, favourites, watchlist, describe) }
+    // The channels the player steps through: this group's, once each.
+    val shown = remember(rows) { rows.map { it.channel }.distinctBy { it.url } }
     var focused by remember { mutableStateOf<Channel?>(null) }
 
     val listState = rememberLazyListState()
     // Focus lands on the channel last played (or the first one) when the
     // list appears, and again whenever the player hands back a different
     // channel than the one that started it.
-    val target = remember(shown, lastPlayed) { shown.indexOfFirst { it.url == lastPlayed }.coerceAtLeast(0) }
+    val target = remember(rows, lastPlayed) { rows.indexOfFirst { it.channel.url == lastPlayed }.coerceAtLeast(0) }
     val targetRequester = remember { FocusRequester() }
     // Keyed on lastPlayed only: moving through the group rail changes
     // `shown` too, and that must not pull focus out of the rail.
@@ -183,7 +233,7 @@ private fun Lineup(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             itemsIndexed(groups, key = { _, g -> g }) { i, g ->
-                val count = remember(channels, g) { if (g == ALL) channels.size else channels.count { it.group == g } }
+                val count = remember(channels, g, favourites, watchlist) { rowsIn(channels, g, favourites, watchlist, describe).size }
                 GroupRow(
                     g, count, selected = g == group, onFocused = { group = g },
                     modifier = if (i == selectedIndex) Modifier.focusRequester(selectedGroupRequester) else Modifier,
@@ -202,9 +252,11 @@ private fun Lineup(
             verticalArrangement = Arrangement.spacedBy(2.dp),
             contentPadding = PaddingValues(vertical = 4.dp),
         ) {
-            itemsIndexed(shown, key = { _, c -> c.url }) { index, channel ->
+            itemsIndexed(rows, key = { _, r -> r.key }) { index, row ->
+                val channel = row.channel
                 ChannelRow(
                     channel = channel,
+                    note = row.note,
                     nowNext = nowNext[channel.url],
                     now = now,
                     modifier = if (index == target) Modifier.focusRequester(targetRequester) else Modifier,
@@ -277,6 +329,7 @@ private fun GroupRow(name: String, count: Int, selected: Boolean, onFocused: () 
 @Composable
 private fun ChannelRow(
     channel: Channel,
+    note: String?,
     nowNext: NowNext?,
     now: Long,
     modifier: Modifier,
@@ -304,7 +357,9 @@ private fun ChannelRow(
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(channel.name, color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val current = nowNext?.now
-            if (current != null) {
+            if (note != null) {
+                Text(note, color = Palette.accent, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            } else if (current != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(current.title, color = Palette.dim, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Spacer(Modifier.width(8.dp))

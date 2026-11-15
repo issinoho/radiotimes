@@ -44,6 +44,7 @@ object Tv {
 
     private const val REFRESH_AFTER_MS = 6 * 60 * 60 * 1000L
     private const val TICK_MS = 60 * 1000L
+    private const val ACCOUNT_EVERY_TICKS = 15
     private const val RETRY_AFTER_MS = 15 * 60 * 1000L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -58,6 +59,14 @@ object Tv {
 
     private val _nowNext = MutableStateFlow<Map<String, NowNext>>(emptyMap())
     val nowNext: StateFlow<Map<String, NowNext>> = _nowNext.asStateFlow()
+
+    /** Channel names starred on the tvtimes account (tvdinner matches by name). */
+    private val _favourites = MutableStateFlow<Set<String>>(emptySet())
+    val favourites: StateFlow<Set<String>> = _favourites.asStateFlow()
+
+    /** Upcoming (or on-now) airings watchlisted on the tvtimes account, soonest first. */
+    private val _watchlist = MutableStateFlow<List<WatchEntry>>(emptyList())
+    val watchlist: StateFlow<List<WatchEntry>> = _watchlist.asStateFlow()
 
     /** The channel last played; the list puts focus back on it. */
     private val _lastPlayed = MutableStateFlow<String?>(null)
@@ -83,6 +92,8 @@ object Tv {
         _lineup.value = Lineup.Loading
         _guide.value = Guide()
         _nowNext.value = emptyMap()
+        _favourites.value = emptySet()
+        _watchlist.value = emptyList()
         retryAt = 0L
         job = scope.launch {
             val configured = Engine.call("configure", tvtimesUrl, cacheDir)
@@ -96,11 +107,15 @@ object Tv {
             _lineup.value = Lineup.Ready(channels)
 
             loadGuide("cached")
+            refreshAccount()
             if (needsRefresh()) loadGuide("refresh")
 
+            var ticks = 0
             while (isActive) {
                 delay(TICK_MS)
                 if (needsRefresh()) loadGuide("refresh") else refreshNowNext()
+                // Favourites and watchlist change in tvtimes; look again every 15 min.
+                if (++ticks % ACCOUNT_EVERY_TICKS == 0) refreshAccount()
             }
         }
     }
@@ -156,11 +171,33 @@ object Tv {
         Log.i(TAG, line)
     }
 
+    /** tvtimes favourites and watchlist; a failure keeps what was there. */
+    private suspend fun refreshAccount() {
+        val fav = Engine.call("favourites")
+        if (bridgeError(fav) == null) {
+            val arr = org.json.JSONArray(fav)
+            _favourites.value = (0 until arr.length()).map { arr.getString(it) }.toSet()
+        }
+        val watch = Engine.call("watchlist")
+        if (bridgeError(watch) == null) {
+            val arr = org.json.JSONArray(watch)
+            val now = System.currentTimeMillis()
+            _watchlist.value = (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                WatchEntry(o.getString("channel_url"), o.optString("channel_name"), o.optString("title"), o.getLong("start"), o.getLong("stop"))
+            }.filter { it.stop > now }.sortedBy { it.start }
+        }
+        Log.i(TAG, "account | ${_favourites.value.size} favourite(s), ${_watchlist.value.size} upcoming on the watchlist")
+    }
+
     private suspend fun refreshNowNext() {
         val json = Engine.call("now_next", System.currentTimeMillis())
         if (bridgeError(json) == null) _nowNext.value = parseNowNext(json)
     }
 }
+
+/** One watchlisted airing (tvtimes' watchlist feed); times are epoch ms. */
+data class WatchEntry(val channelUrl: String, val channelName: String, val title: String, val start: Long, val stop: Long)
 
 object Prefs {
     private const val FILE = "radiotimes"
