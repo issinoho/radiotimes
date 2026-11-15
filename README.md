@@ -92,10 +92,9 @@ Next:
    **Install unknown apps** for Downloader (on Fire OS 8, tap *About →
    Fire TV Stick* seven times first to reveal Developer options).
 2. Install **Downloader** (by AFTVnews) from the Amazon Appstore.
-3. In Downloader, enter the radiotimes code (see the
-   [tvdinner site](https://tvdinner.issinoho.com/#radiotimes)) or this
-   address, which always fetches the latest release:
-   `https://github.com/issinoho/radiotimes/releases/latest/download/radiotimes.apk`
+3. In Downloader, enter the code **8716486** (or the address it stands
+   for, which always fetches the latest release:
+   `https://github.com/issinoho/radiotimes/releases/latest/download/radiotimes.apk`).
 4. Install, open radiotimes, and scan the QR code with your phone.
 
 **With adb (developers):** turn on **ADB debugging** too, note the Stick's
