@@ -34,6 +34,7 @@ import logging
 import re
 import sys
 import time
+import urllib.parse
 import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -400,19 +401,40 @@ def _plex_server(index: int) -> tv_plex.PlexCreds:
     return _plex[index]
 
 
+def _plex_small(url: str | None, width: int, height: int) -> str | None:
+    """The same Plex image, resized by the server's photo transcoder. A
+    poster from tvdinner's node builders is the full-size original (~750 KB
+    on a real server, ~1.2 s each): a grid of 60 crawled in on the TV.
+    At grid size it's a few tens of KB."""
+    if not url:
+        return None
+    parts = urllib.parse.urlsplit(url)
+    query = urllib.parse.parse_qs(parts.query)
+    token = (query.pop("X-Plex-Token", [None]))[0]
+    if not token or not parts.path.startswith("/library/"):
+        return url
+    inner = parts.path + ("?" + urllib.parse.urlencode(query, doseq=True) if query else "")
+    params = urllib.parse.urlencode(
+        {"width": width, "height": height, "minSize": 1, "upscale": 1, "url": inner, "X-Plex-Token": token}
+    )
+    return f"{parts.scheme}://{parts.netloc}/photo/:/transcode?{params}"
+
+
 def _node_json(node: tv_plex.PlexNode) -> dict[str, Any]:
+    episode = node.kind == "episode"
     return {
         "rating_key": node.rating_key,
         "title": node.title,
         "kind": node.kind,
         "container": node.container,
         "subtitle": node.subtitle,
-        "thumb": node.thumb_url,
+        # Episode stills are 16:9 (the episode list); everything else a 2:3 poster.
+        "thumb": _plex_small(node.thumb_url, 320, 180) if episode else _plex_small(node.thumb_url, 240, 360),
         "watched": node.watched,
         "progress": node.watch_progress,
         "year": node.year,
         "series_title": node.series_title,
-        "season_thumb": node.season_thumb_url,
+        "season_thumb": _plex_small(node.season_thumb_url, 240, 360),
     }
 
 
@@ -473,6 +495,47 @@ def plex_children(server: int, node_json: str | None = None) -> str:
     nodes, error = tv_plex.list_plex_node_children(creds, node)
     if error:
         return _err(error)
+    return _ok([_node_json(n) for n in nodes])
+
+
+# Plex's own type numbers for /library/sections/<key>/all?type=...
+_PLEX_TYPE_MOVIE = "1"
+_PLEX_TYPE_EPISODE = "4"
+_LIBRARY_VIEW_SORT = {"recently_added": "addedAt:desc", "recently_released": "originallyAvailableAt:desc"}
+_LIBRARY_VIEW_SIZE = "60"
+
+
+@_guarded
+def plex_library_view(server: int, node_json: str, view: str) -> str:
+    """A library's "all" listing (tvdinner's own), or its 60 most recently
+    added / released items. Movie libraries list movies; TV libraries list
+    episodes, which is what "recent" means there (a show added years ago
+    gets new episodes).
+
+    tvdinner has no call for the recent views, so this uses its private
+    _api_get and node builders -- read, not modified; the pinned submodule
+    and these tests catch any change on upgrade."""
+    node = _node_from(json.loads(node_json))
+    creds = _plex_server(server)
+    if view == "all":
+        nodes, error = tv_plex.list_plex_node_children(creds, node)
+        return _err(error) if error else _ok([_node_json(n) for n in nodes])
+    if view not in _LIBRARY_VIEW_SORT or node.kind not in ("library_movie", "library_show"):
+        return _err(f"No {view!r} view for this")
+    movies = node.kind == "library_movie"
+    params = {
+        "type": _PLEX_TYPE_MOVIE if movies else _PLEX_TYPE_EPISODE,
+        "sort": _LIBRARY_VIEW_SORT[view],
+        "X-Plex-Container-Start": "0",
+        "X-Plex-Container-Size": _LIBRARY_VIEW_SIZE,
+    }
+    try:
+        result = tv_plex._api_get(creds, f"/library/sections/{node.rating_key}/all", params=params)
+    except tv_plex._PlexApiError as exc:
+        return _err(str(exc))
+    build = tv_plex._movie_node if movies else tv_plex._episode_node
+    items = (result.get("MediaContainer") or {}).get("Metadata") or []
+    nodes = [n for n in (build(creds, item) for item in items if isinstance(item, dict)) if n is not None]
     return _ok([_node_json(n) for n in nodes])
 
 

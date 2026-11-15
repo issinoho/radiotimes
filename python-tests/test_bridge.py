@@ -314,6 +314,7 @@ PLEX_ROUTES: dict[str, object] = {
             ]
         }
     },
+    "/library/sections/2/all": {"MediaContainer": {"Metadata": []}},
     "/library/sections/1/all": {
         "MediaContainer": {
             "Metadata": [
@@ -373,6 +374,9 @@ def test_plex_library_children_and_resolve(plex) -> None:
     movies = json.loads(bridge.plex_children(0, json.dumps(films)))
     assert movies[0]["title"] == "Casino Royale" and movies[0]["container"] is False
     assert PLEX_TOKEN in movies[0]["thumb"]  # the image loader needs it
+    # Grid posters come resized by Plex's photo transcoder, not full size.
+    assert movies[0]["thumb"].startswith(f"{PLEX}/photo/:/transcode?width=240&height=360")
+    assert "url=%2Flibrary%2Fmetadata%2F10%2Fthumb%2F1" in movies[0]["thumb"]
     item = json.loads(bridge.plex_resolve(0, json.dumps(movies[0])))
     assert item["url"] == f"{PLEX}/library/parts/99/file.mkv?X-Plex-Token={PLEX_TOKEN}"
     assert item["resume_seconds"] == 600
@@ -485,3 +489,26 @@ def test_plex_link_flow(monkeypatch, tmp_path) -> None:
 def test_plex_link_expired(monkeypatch) -> None:
     monkeypatch.setattr(requests, "get", _PlexTv().get)
     assert "expired" in json.loads(bridge.plex_link_poll(43))["error"]
+
+
+
+def test_plex_library_recent_views(plex, monkeypatch) -> None:
+    films = json.loads(bridge.plex_children(0))[1]
+    seen: list[dict] = []
+    real_get = requests.get
+
+    def spy(url: str, *args: object, **kwargs: object):
+        seen.append(dict(kwargs.get("params") or {}))
+        return real_get(url, *args, **kwargs)
+
+    monkeypatch.setattr(requests, "get", spy)
+    nodes = json.loads(bridge.plex_library_view(0, json.dumps(films), "recently_added"))
+    assert [n["title"] for n in nodes] == ["Casino Royale"]
+    assert seen[-1]["sort"] == "addedAt:desc" and seen[-1]["type"] == "1"
+    json.loads(bridge.plex_library_view(0, json.dumps(films), "recently_released"))
+    assert seen[-1]["sort"] == "originallyAvailableAt:desc"
+    tv = json.loads(bridge.plex_children(0))[2]
+    bridge.plex_library_view(0, json.dumps(tv), "recently_added")
+    assert seen[-1]["type"] == "4"  # episodes, for a TV library
+    assert [n["title"] for n in json.loads(bridge.plex_library_view(0, json.dumps(films), "all"))] == ["Casino Royale"]
+    assert "error" in json.loads(bridge.plex_library_view(0, json.dumps(films), "sideways"))

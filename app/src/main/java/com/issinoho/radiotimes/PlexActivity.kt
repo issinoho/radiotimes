@@ -70,7 +70,12 @@ class PlexActivity : ComponentActivity() {
         var error by mutableStateOf<String?>(null)
         var query by mutableStateOf("")
         var focus = 0
+        /** A library's tab: "all", "recently_added" or "recently_released". */
+        var view by mutableStateOf("all")
+        /** False after a tab switch, so the reloaded grid doesn't pull focus off the tabs. */
+        var grabFocus = true
         val isSearch get() = node?.kind == SEARCH
+        val isLibrary get() = node?.kind == "library_movie" || node?.kind == "library_show"
         val isDetail get() = node != null && !node.container && !isSearch
     }
 
@@ -95,7 +100,7 @@ class PlexActivity : ComponentActivity() {
                         level.isDetail && detail != null -> PlexDetailScreen(detail) { fromStart ->
                             startActivity(VodPlayerActivity.intent(this@PlexActivity, server, detail.json, fromStart))
                         }
-                        else -> Browser(path = stack.map { it.title }, level = level, onOpen = ::open, onSearch = ::search)
+                        else -> Browser(path = stack.map { it.title }, level = level, onOpen = ::open, onSearch = ::search, onView = ::switchView)
                     }
                 }
             }
@@ -122,6 +127,7 @@ class PlexActivity : ComponentActivity() {
             val json = when {
                 level.isSearch -> Engine.callPlex("plex_search", server, level.query)
                 level.isDetail -> Engine.callPlex("plex_resolve", server, level.node!!.json)
+                level.isLibrary -> Engine.callPlex("plex_library_view", server, level.node!!.json, level.view)
                 else -> Engine.callPlex("plex_children", server, level.node?.json)
             }
             val error = bridgeError(json)
@@ -137,6 +143,15 @@ class PlexActivity : ComponentActivity() {
                 else -> level.items = parsePlexNodes(json)
             }
         }
+    }
+
+    private fun switchView(view: String) {
+        val level = stack.lastOrNull()?.takeIf { it.isLibrary && it.view != view } ?: return
+        level.view = view
+        level.items = null
+        level.focus = 0
+        level.grabFocus = false
+        reload(level)
     }
 
     private fun search(query: String) {
@@ -171,8 +186,14 @@ class PlexActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Browser(path: List<String>, level: Level, onOpen: (PlexNode, Int) -> Unit, onSearch: (String) -> Unit) {
-        var focused by remember(level) { mutableStateOf<PlexNode?>(null) }
+    private fun Browser(
+        path: List<String>,
+        level: Level,
+        onOpen: (PlexNode, Int) -> Unit,
+        onSearch: (String) -> Unit,
+        onView: (String) -> Unit,
+    ) {
+        var focused by remember(level, level.view) { mutableStateOf<PlexNode?>(null) }
         Column(Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 22.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Plex", color = Palette.accent, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -190,6 +211,10 @@ class PlexActivity : ComponentActivity() {
                 Spacer(Modifier.height(8.dp))
             }
             FocusedSummary(focused, Modifier.fillMaxWidth().height(78.dp))
+            if (level.isLibrary) {
+                ViewTabs(level.view, onView)
+                Spacer(Modifier.height(10.dp))
+            }
             Spacer(Modifier.height(8.dp))
             val items = level.items
             when {
@@ -200,8 +225,38 @@ class PlexActivity : ComponentActivity() {
                 items.isEmpty() -> Message("Nothing here")
                 level.node == null -> Tiles(items, level.focus, { focused = it }, onOpen)
                 level.node.kind == "season" -> Episodes(items, level.focus, { focused = it }, onOpen)
-                else -> Posters(items, level.focus, { focused = it }, onOpen)
+                else -> Posters(items, level.focus, level.grabFocus, { focused = it }, onOpen)
             }
+        }
+    }
+}
+
+/** All · Recently Added · Recently Released. Like the channel groups, focusing a tab selects it. */
+@Composable
+private fun ViewTabs(current: String, onView: (String) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        for ((view, label) in listOf("all" to "All", "recently_added" to "Recently Added", "recently_released" to "Recently Released")) {
+            var hasFocus by remember { mutableStateOf(false) }
+            val selected = view == current
+            Text(
+                label,
+                color = if (selected || hasFocus) Palette.text else Palette.dim,
+                fontSize = 15.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        when {
+                            hasFocus -> Palette.focus
+                            selected -> Color(0x1AFFFFFF)
+                            else -> Color.Transparent
+                        },
+                    )
+                    .border(2.dp, if (hasFocus) Palette.text else Color.Transparent, RoundedCornerShape(18.dp))
+                    .onFocusChanged { hasFocus = it.isFocused; if (it.isFocused) onView(view) }
+                    .clickable { onView(view) }
+                    .padding(horizontal = 16.dp, vertical = 7.dp),
+            )
         }
     }
 }
@@ -250,9 +305,10 @@ private fun FocusedSummary(node: PlexNode?, modifier: Modifier) {
 
 /** Focus goes to `index` once that item is laid out (first visit: 0; coming back up: where you were). */
 @Composable
-private fun rememberRestoredFocus(index: Int): FocusRequester {
+private fun rememberRestoredFocus(index: Int, enabled: Boolean = true): FocusRequester {
     val requester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
+        if (!enabled) return@LaunchedEffect
         repeat(60) {
             if (runCatching { requester.requestFocus() }.isSuccess) return@LaunchedEffect
             delay(30)
@@ -299,9 +355,9 @@ private fun Tiles(items: List<PlexNode>, focus: Int, onFocus: (PlexNode) -> Unit
 }
 
 @Composable
-private fun Posters(items: List<PlexNode>, focus: Int, onFocus: (PlexNode) -> Unit, onOpen: (PlexNode, Int) -> Unit) {
+private fun Posters(items: List<PlexNode>, focus: Int, grabFocus: Boolean, onFocus: (PlexNode) -> Unit, onOpen: (PlexNode, Int) -> Unit) {
     val state = rememberLazyGridState(initialFirstVisibleItemIndex = focus)
-    val requester = rememberRestoredFocus(focus)
+    val requester = rememberRestoredFocus(focus, enabled = grabFocus)
     LazyVerticalGrid(
         columns = GridCells.Fixed(7), state = state,
         horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -334,7 +390,10 @@ private fun Posters(items: List<PlexNode>, focus: Int, onFocus: (PlexNode) -> Un
                     }
                 }
                 Text(
-                    node.title, color = if (hasFocus) Palette.text else Palette.dim, fontSize = 12.sp,
+                    // An episode's own title ("Episode 7") means little under a
+                    // poster; the show's name says what it is.
+                    (if (node.isEpisode) node.seriesTitle else null) ?: node.title,
+                    color = if (hasFocus) Palette.text else Palette.dim, fontSize = 12.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
                 )
             }

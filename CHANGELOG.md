@@ -11,8 +11,8 @@ First release.
 - **Guide**: ☰ opens a channels × time grid over the picture, which keeps
   playing in the corner; OK previews a channel, OK again shows full
   programme details.
-- **Plex**: any number of servers; search, On Deck, libraries, shows,
-  seasons, episodes; a details page with Resume / Play from the start;
+- **Plex**: any number of servers; search, On Deck, libraries (All /
+  Recently Added / Recently Released), shows, seasons, episodes; a details page with Resume / Play from the start;
   skip intro / skip credits / next episode; audio and subtitle tracks
   (including Plex's sidecar subtitles); progress reported back to Plex.
 - **Setup without typing tokens**: scan the QR code on the TV and paste

@@ -22,7 +22,8 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   from cache and refreshes in the background when it's over 6 hours old.
 - **Player:** fullscreen live TV with a now/next banner.
 - **Plex:** each Plex server is an entry in the group rail. Search, On
-  Deck and libraries as poster grids, shows → seasons → episodes. OK on a
+  Deck and libraries as poster grids (each library with **All**,
+  **Recently Added** and **Recently Released** tabs), shows → seasons → episodes. OK on a
   movie or episode opens its details (summary, cast, director, genres,
   runtime, file quality, progress) with **Resume** / **Play from the
   start**. Plays the file directly with a seek bar; **Skip intro** /
