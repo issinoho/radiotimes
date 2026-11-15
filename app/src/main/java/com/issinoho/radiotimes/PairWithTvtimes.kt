@@ -67,7 +67,7 @@ fun PairWithTvtimes(focusFirst: Boolean, onLinked: (String) -> Unit, onBusy: (Bo
 
     fun pair(server: Pairing.Server) {
         if (!server.canPair) {
-            state = PairState.Problem("That tvtimes (${server.version}) can't pair yet: it needs a newer tvtimes. Use your phone or the link instead.")
+            state = PairState.Problem("That tvtimes (${server.version}) can't pair: it needs tvtimes 1.4.0 or newer. Use your phone or the link instead.")
             return
         }
         scope.launch {

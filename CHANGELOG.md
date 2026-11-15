@@ -1,13 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - **Pair with tvtimes**: setup (and Settings) can now pair the TV with
   tvtimes instead of copying a link. The TV searches your network for
   tvtimes (or takes its address), shows a code, and you enter it in
   tvtimes under Settings → Devices; the TV gets its own feed token,
   which you can revoke there on its own. Needs a tvtimes with device
-  pairing (tvtimes PR #238); the phone page and typed links still work
+  pairing (tvtimes 1.4.0); the phone page and typed links still work
   with any tvtimes.
 - **Plex ☰ panel fits however long the details are**: a long synopsis,
   cast and file line no longer push the buttons' hint ("☰ or Back to

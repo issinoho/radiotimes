@@ -62,7 +62,7 @@ Done: engine probe → live TV → guide over the picture → Plex (details,
 resume, skip intro/credits, tracks, search, transcode fallback) → setup
 from a phone and plex.tv/link → signed releases and the Downloader code
 → tvtimes favourites, watchlist and watch reporting → find-and-approve
-pairing (the tvtimes side is tvtimes PR #238; discovery is a scan of the
+pairing (the tvtimes side shipped in tvtimes 1.4.0; discovery is a scan of the
 TV's /24 for tvtimes' `/api/healthz`, since mDNS from tvtimes' Docker
 bridge network wouldn't reach the LAN, with a typed address as the
 fallback).

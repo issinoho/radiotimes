@@ -16,7 +16,7 @@ import java.net.URLEncoder
 
 /**
  * Find-and-approve pairing with tvtimes (its `/api/pairing/start` and `/poll`, tvtimes
- * PR #238): find tvtimes on the LAN or take its address, ask for a code,
+ * 1.4.0+): find tvtimes on the LAN or take its address, ask for a code,
  * show it, and poll until someone enters it under tvtimes' Settings →
  * Devices; the answer is this TV's own export token, from which the usual
  * `tvtimes(s)://` link is built. No tvdinner involved: this is radiotimes

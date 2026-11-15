@@ -53,7 +53,7 @@ from CI.
   Plex links reach the app via Settings or `--es plex`, never the repo.
 - **No tvtimes changes are assumed.** The app uses only `/api/exports/*`,
   plus, for pairing only, `/api/healthz` and `/api/pairing/start|poll`
-  (`Pairing.kt`; tvtimes PR #238). Pairing is optional: a tvtimes
+  (`Pairing.kt`; tvtimes 1.4.0 or newer). Pairing is optional: a tvtimes
   without it is shown as unable to pair and the phone page / typed link
   still work. Pairing talks to tvtimes directly (no tvdinner: there is
   no link yet), and the token it receives goes only into the saved link.
