@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The update notice shows within the hour** of a release: radiotimes
+  now asks GitHub at most hourly (was every 12 hours, so a TV that had
+  just checked wouldn't notice a new release until the next day).
+
 ## 0.7.0
 
 - **Pair with tvtimes**: setup (and Settings) can now pair the TV with

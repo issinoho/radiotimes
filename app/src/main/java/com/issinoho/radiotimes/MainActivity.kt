@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // The app can sit open for days on a TV; look again (at most every 12 h).
+        // The app can sit open for days on a TV; look again (at most hourly).
         Updates.check(this)
     }
 

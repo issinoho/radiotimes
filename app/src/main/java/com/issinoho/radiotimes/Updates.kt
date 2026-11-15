@@ -23,7 +23,9 @@ import java.net.URL
 object Updates {
     const val DOWNLOADER_CODE = "8716486"
     private const val LATEST = "https://api.github.com/repos/issinoho/radiotimes/releases/latest"
-    private const val CHECK_EVERY_MS = 12 * 60 * 60 * 1000L
+    // GitHub allows 60 unauthenticated calls an hour per address; a few TVs
+    // checking hourly stay far below that, and a release shows within the hour.
+    private const val CHECK_EVERY_MS = 60 * 60 * 1000L
     private const val FILE = "radiotimes"
     private const val KEY_TAG = "latest_release"
     private const val KEY_CHECKED = "latest_checked"
