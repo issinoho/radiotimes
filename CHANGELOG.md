@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - **Live channels reconnect by themselves.** A dropped or frozen stream
   is retried automatically (after 1, 2, 4, 8, 15 s, then every 30 s, the
