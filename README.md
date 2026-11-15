@@ -58,11 +58,14 @@ Next:
   radiotimes advertises itself on the LAN; tvdinner's bookmarks screen
   pushes chosen tvtimes/Plex bookmarks to it in one keypress.
 - **plex.tv linking in tvdinner itself**, so both apps share it.
-- **Phone setup on networks that block it** *(open issue)*: on the
-  author's own phone the QR page fails with ERR_TOO_MANY_RETRIES although
-  the phone pings the TV and other devices load the page; no connection
-  reaches the TV, so something on the phone intercepts port 8765. The
-  tvtimes pairing above would avoid the LAN path entirely.
+- **Phone setup when the phone can't reach the TV** *(open issue)*: on
+  the author's phone the QR page fails with ERR_TOO_MANY_RETRIES. That
+  phone pings the TV but can't open a TCP connection to any device on the
+  LAN (a test page on a laptop failed the same way, and a port scan of
+  the TV showed even adb's port closed) -- something on the phone (a VPN
+  or firewall app) blocks local connections. radiotimes can't fix that
+  from the TV; the tvtimes pairing above would avoid the LAN path
+  entirely.
 
 ### Remote
 
