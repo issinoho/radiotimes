@@ -13,7 +13,11 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -73,6 +77,12 @@ class VodPlayerActivity : ComponentActivity() {
     private var firstFrameLogged = false
     private val notice = mutableStateOf<String?>(null)
     private var noticeJob: Job? = null
+    /** What's playing, for the info banner (OK) and details panel (☰). */
+    private val detail = mutableStateOf<PlexDetail?>(null)
+    private enum class Info { None, Banner, Full }
+    private val info = mutableStateOf(Info.None)
+    private val positionMs = mutableStateOf(0L)
+    private val durationMs = mutableStateOf(0L)
     /** "Skip intro" / "Skip credits" / "Next episode", while inside a Plex marker. */
     private val skip = mutableStateOf<String?>(null)
     private var markerJob: Job? = null
@@ -81,7 +91,9 @@ class VodPlayerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         server = intent.getIntExtra(EXTRA_SERVER, 0)
-        item = parse(intent.getStringExtra(EXTRA_ITEM) ?: return finish())
+        val itemJson = intent.getStringExtra(EXTRA_ITEM) ?: return finish()
+        item = parse(itemJson)
+        detail.value = PlexDetail(itemJson)
         if (intent.getBooleanExtra(EXTRA_FROM_START, false)) item = item.copy(resumeSeconds = null)
 
         setContent {
@@ -92,13 +104,26 @@ class VodPlayerActivity : ComponentActivity() {
                             PlayerView(ctx).apply {
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                                 setShowSubtitleButton(true)
-                                controllerShowTimeoutMs = 4_000
+                                controllerShowTimeoutMs = 5_000
+                                // The banner goes with the controller it was shown with.
+                                setControllerVisibilityListener(
+                                    PlayerView.ControllerVisibilityListener { visibility ->
+                                        if (visibility != android.view.View.VISIBLE && info.value == Info.Banner) info.value = Info.None
+                                    },
+                                )
                                 player = this@VodPlayerActivity.player
                                 view = this
                             }
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
+                    val d = detail.value
+                    if (d != null && info.value == Info.Banner) {
+                        PlexNowPlaying(d, positionMs.value, durationMs.value, Modifier.align(Alignment.TopCenter))
+                    }
+                    if (d != null && info.value == Info.Full) {
+                        PlexNowPlayingFull(d, positionMs.value, durationMs.value, Modifier.align(Alignment.CenterStart))
+                    }
                     skip.value?.let {
                         Text(
                             "$it   ›  OK",
@@ -200,6 +225,10 @@ class VodPlayerActivity : ComponentActivity() {
             while (isActive) {
                 delay(500)
                 skip.value = skipLabel()
+                player?.let { p ->
+                    positionMs.value = p.currentPosition
+                    durationMs.value = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
+                }
             }
         }
     }
@@ -287,6 +316,7 @@ class VodPlayerActivity : ComponentActivity() {
             if (player == null) return@launch
             val resolved = Engine.callPlex("plex_resolve", server, node.json)
             if (bridgeError(resolved) != null) return@launch finish()
+            detail.value = PlexDetail(resolved)
             load(parse(resolved))
         }
     }
@@ -298,29 +328,35 @@ class VodPlayerActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // OK with the controller hidden toggles pause, like every TV player;
-        // otherwise the controller (seek bar, buttons) takes the D-pad.
         val v = view
+        val ok = event.keyCode in intArrayOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)
+        // ☰ / Info: the full details panel, on and off.
+        if (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_INFO) {
+            if (event.action == KeyEvent.ACTION_UP) info.value = if (info.value == Info.Full) Info.None else Info.Full
+            return true
+        }
+        // Back closes the details panel first, then the controller, then leaves.
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && info.value == Info.Full) {
+            if (event.action == KeyEvent.ACTION_UP) info.value = Info.None
+            return true
+        }
         // A showing skip button takes OK (when the controller is hidden).
-        if (skip.value != null && v != null && !v.isControllerFullyVisible &&
-            event.keyCode in intArrayOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)
-        ) {
+        if (skip.value != null && v != null && !v.isControllerFullyVisible && ok) {
             if (event.action == KeyEvent.ACTION_UP) doSkip()
             return true
         }
-        // Back hides the controller first, then leaves.
         if (v != null && v.isControllerFullyVisible && event.keyCode == KeyEvent.KEYCODE_BACK) {
             if (event.action == KeyEvent.ACTION_UP) v.hideController()
             return true
         }
-        if (v != null && !v.isControllerFullyVisible && event.action == KeyEvent.ACTION_UP &&
-            event.keyCode in intArrayOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)
-        ) {
-            player?.let { it.playWhenReady = !it.playWhenReady }
-            v.showController()
-            return true
-        }
-        if (v != null && !v.isControllerFullyVisible && event.keyCode in intArrayOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER)) {
+        // OK while watching: controller plus the info banner, like live TV's
+        // banner. The controller's play/pause button has focus, so a second
+        // OK pauses; the remote's play/pause key works throughout.
+        if (v != null && !v.isControllerFullyVisible && ok) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                info.value = if (info.value == Info.Full) Info.Full else Info.Banner
+                v.showController()
+            }
             return true
         }
         return super.dispatchKeyEvent(event)
@@ -342,4 +378,95 @@ class VodPlayerActivity : ComponentActivity() {
 private fun hms(ms: Long): String {
     val s = ms / 1000
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+}
+
+private fun clockMs(ms: Long): String = hms(ms)
+
+/** The top banner shown with the controller: what this is and where you are in it. */
+@androidx.compose.runtime.Composable
+private fun PlexNowPlaying(d: PlexDetail, positionMs: Long, durationMs: Long, modifier: Modifier) {
+    val now = rememberNow()
+    androidx.compose.foundation.layout.Row(
+        modifier
+            .fillMaxWidth()
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xE6000000), Color.Transparent)))
+            .padding(start = 48.dp, end = 48.dp, top = 28.dp, bottom = 56.dp),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(20.dp),
+    ) {
+        d.poster?.let {
+            coil.compose.AsyncImage(
+                model = it, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(84.dp, 126.dp).clip(RoundedCornerShape(6.dp)),
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)) {
+            val heading = listOfNotNull(
+                d.seriesTitle,
+                if (d.season != null && d.episode != null) "S${d.season} E${d.episode}" else null,
+            ).joinToString("  ·  ")
+            if (heading.isNotEmpty()) Text(heading, color = Palette.dim, fontSize = 15.sp)
+            androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    d.title, color = Palette.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                )
+                Text(clockText(now), color = Palette.text, fontSize = 20.sp)
+            }
+            Text(
+                listOfNotNull(d.year, d.contentRating, d.rating?.let { "★ $it" }, d.genres.take(3).joinToString(" · ").ifEmpty { null })
+                    .joinToString("   ·   "),
+                color = Palette.dim, fontSize = 14.sp,
+            )
+            d.description?.let {
+                Text(it, color = Palette.text, fontSize = 15.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            if (durationMs > 0) {
+                val left = (durationMs - positionMs).coerceAtLeast(0)
+                Text(
+                    "${clockMs(positionMs)} / ${clockMs(durationMs)}   ·   ${left / 60_000} min left   ·   ends at ${clockText(now + left)}",
+                    color = Palette.dim, fontSize = 14.sp,
+                )
+            }
+            Text("☰  more about this", color = Palette.dim, fontSize = 13.sp)
+        }
+    }
+}
+
+/** ☰: everything about what's playing, over the left of the picture. */
+@androidx.compose.runtime.Composable
+private fun PlexNowPlayingFull(d: PlexDetail, positionMs: Long, durationMs: Long, modifier: Modifier) {
+    val now = rememberNow()
+    Column(
+        modifier
+            .width(560.dp)
+            .fillMaxHeight()
+            .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xF20B0A1F), Color(0xCC0B0A1F), Color.Transparent)))
+            .padding(start = 48.dp, end = 40.dp, top = 40.dp, bottom = 40.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+    ) {
+        val heading = listOfNotNull(
+            d.seriesTitle,
+            d.season?.let { "Season $it" }, d.episode?.let { "Episode $it" },
+        ).joinToString("  ·  ")
+        if (heading.isNotEmpty()) Text(heading, color = Palette.dim, fontSize = 16.sp)
+        Text(d.title, color = Palette.text, fontSize = 30.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+        Text(
+            listOfNotNull(d.year, d.contentRating, d.durationMs?.let { "${it / 60_000} min" }, d.rating?.let { "★ $it" }).joinToString("   ·   "),
+            color = Palette.text, fontSize = 15.sp,
+        )
+        if (d.genres.isNotEmpty()) Text(d.genres.joinToString(" · "), color = Palette.accent, fontSize = 15.sp)
+        d.tagline?.let { Text(it, color = Palette.dim, fontSize = 15.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) }
+        d.description?.let { Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 9, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+        d.director?.let { Text("Director  $it", color = Palette.dim, fontSize = 14.sp) }
+        if (d.cast.isNotEmpty()) Text("Cast  ${d.cast.joinToString(", ")}", color = Palette.dim, fontSize = 14.sp, maxLines = 2)
+        d.studio?.let { Text("Studio  $it", color = Palette.dim, fontSize = 14.sp) }
+        listOfNotNull(d.video, d.audio).takeIf { it.isNotEmpty() }?.let { Text("File  ${it.joinToString("  ·  ")}", color = Palette.dim, fontSize = 14.sp) }
+        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        if (durationMs > 0) {
+            val left = (durationMs - positionMs).coerceAtLeast(0)
+            ProgressBar((positionMs.toFloat() / durationMs).coerceIn(0f, 1f), Modifier.width(420.dp))
+            Text("${left / 60_000} min left  ·  ends at ${clockText(now + left)}", color = Palette.dim, fontSize = 14.sp)
+        }
+        Text("☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
+    }
 }

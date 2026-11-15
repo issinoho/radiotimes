@@ -58,6 +58,11 @@ Next:
   radiotimes advertises itself on the LAN; tvdinner's bookmarks screen
   pushes chosen tvtimes/Plex bookmarks to it in one keypress.
 - **plex.tv linking in tvdinner itself**, so both apps share it.
+- **Phone setup on networks that block it** *(open issue)*: on the
+  author's own phone the QR page fails with ERR_TOO_MANY_RETRIES although
+  the phone pings the TV and other devices load the page; no connection
+  reaches the TV, so something on the phone intercepts port 8765. The
+  tvtimes pairing above would avoid the LAN path entirely.
 
 ### Remote
 
@@ -74,7 +79,8 @@ Next:
 | Plex | OK | open a list, or a movie/episode's details |
 | | OK on Resume / Play | play |
 | | Back | up a level |
-| Plex player | OK | pause / play — or press the Skip / Next episode button when it shows |
+| Plex player | OK | controls and what's playing (again: pause) — or press the Skip / Next episode button when it shows |
+| | ☰ / Info | full details of what's playing |
 | | ↑ ↓ ← → | show the seek bar and controls |
 | | ⏪ ⏩ | back 10 s / forward 30 s |
 | | Back | hide controls, then leave (progress is saved to Plex) |

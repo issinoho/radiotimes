@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2
+
+- **Plex player: programme information.** OK while watching shows the
+  controls with a banner: show, season and episode, title, year,
+  certificate, rating, genres, a short summary, position, time left and
+  when it ends. ☰ (or Info) opens the full details over the picture:
+  complete summary, director, cast, studio and file quality. Back or ☰
+  closes it. A second OK pauses (the controller's play/pause has focus).
+
 ## 0.4.1
 
 - **Fix: phone setup page failed with ERR_TOO_MANY_RETRIES** and could
