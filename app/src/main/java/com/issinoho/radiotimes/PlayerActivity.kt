@@ -70,6 +70,7 @@ class PlayerActivity : ComponentActivity() {
     private sealed interface Status {
         data object Tuning : Status
         data object Playing : Status
+        data class Reconnecting(val attempt: Int) : Status
         data class Failed(val message: String) : Status
     }
 
@@ -146,6 +147,7 @@ class PlayerActivity : ComponentActivity() {
                     ) {
                         val line = when (val st = status.value) {
                             Status.Tuning -> "Connecting…"
+                            is Status.Reconnecting -> "Lost the stream. Reconnecting… (attempt ${st.attempt})"
                             Status.Playing -> null
                             is Status.Failed -> st.message
                         }
@@ -193,24 +195,66 @@ class PlayerActivity : ComponentActivity() {
                         "${f?.sampleMimeType} ${f?.width}x${f?.height} · codecs ${f?.codecs} · " +
                         "audio ${a?.let { "${it.sampleMimeType} ${it.channelCount}ch ${it.sampleRate} Hz" } ?: "none"}",
                 )
+                val wasReconnecting = status.value is Status.Reconnecting
                 status.value = Status.Playing
+                if (wasReconnecting) Log.i(TAG, "play | ${channel?.name}: reconnected after $reconnectAttempt attempt(s)")
+                reconnectAttempt = 0
+                reconnectSince = 0L
                 showBanner()
+            }
+
+            override fun onPlaybackStateChanged(state: Int) {
+                // A live channel never really ends: a progressive (MPEG-TS)
+                // stream whose connection closes looks to ExoPlayer like a
+                // file reaching its end, with no error -- the picture just
+                // froze. Treat it as a drop.
+                if (state == Player.STATE_ENDED && status.value == Status.Playing) reconnect("stream ended")
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "play | ${channel?.name}: ${error.errorCodeName}: ${error.message}")
-                status.value = Status.Failed(describe(error))
+                when {
+                    // Fell behind the live window (a pause, a slow link): rejoin live.
+                    error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW -> {
+                        exo.seekToDefaultPosition()
+                        exo.prepare()
+                    }
+                    // Retrying can't help when the device can't play the format.
+                    error.errorCode in UNRECOVERABLE -> status.value = Status.Failed(describe(error))
+                    else -> reconnect(error.errorCodeName, describe(error))
+                }
             }
         })
         exo.playWhenReady = true
         player = exo
         view?.player = exo
         tune(delayMs = 0)
+        // Freeze watchdog: playing, yet the position hasn't moved for
+        // STALL_MS (stuck buffering, or a provider that keeps the connection
+        // open but stops sending) -> reconnect.
+        stallJob = lifecycleScope.launch {
+            var lastPosition = -1L
+            var lastMoved = SystemClock.elapsedRealtime()
+            while (true) {
+                delay(2_000)
+                val p = player ?: continue
+                val now = SystemClock.elapsedRealtime()
+                if (status.value != Status.Playing || !p.playWhenReady || p.currentPosition != lastPosition) {
+                    lastPosition = p.currentPosition
+                    lastMoved = now
+                } else if (now - lastMoved > STALL_MS) {
+                    lastMoved = now
+                    reconnect("no progress for ${STALL_MS / 1000} s")
+                }
+            }
+        }
     }
 
     override fun onStop() {
         super.onStop()
         tuneJob?.cancel()
+        reconnectJob?.cancel()
+        stallJob?.cancel()
         view?.player = null
         player?.release()
         player = null
@@ -223,9 +267,15 @@ class PlayerActivity : ComponentActivity() {
         tune(delayMs = TUNE_DELAY_MS)
     }
 
-    private fun tune(delayMs: Long) {
+    private fun tune(delayMs: Long, retry: Boolean = false) {
         val target = channel ?: return
-        status.value = Status.Tuning
+        if (!retry) {
+            // A new channel (or a fresh start) begins with a clean slate.
+            reconnectJob?.cancel()
+            reconnectAttempt = 0
+            reconnectSince = 0L
+            status.value = Status.Tuning
+        }
         showBanner()
         tuneJob?.cancel()
         // Stop the old stream at once: it frees the provider connection
@@ -239,7 +289,7 @@ class PlayerActivity : ComponentActivity() {
                 withContext(Dispatchers.IO) { StreamResolver.resolve(target.url) }
             } catch (e: Exception) {
                 Log.e(TAG, "play | ${target.name}: could not resolve: ${redactTokens(e.message.orEmpty())}")
-                status.value = Status.Failed("Couldn't reach the stream (${redactTokens(e.message.orEmpty())})")
+                reconnect("resolve failed", "Couldn't reach the stream (${redactTokens(e.message.orEmpty())})")
                 return@launch
             }
             Log.i(
@@ -274,6 +324,39 @@ class PlayerActivity : ComponentActivity() {
         index.intValue = i
         channel?.let { Tv.played(this, it) }
         tune(delayMs = 0)
+    }
+
+    private var reconnectJob: Job? = null
+    private var stallJob: Job? = null
+    private var reconnectAttempt = 0
+    /** When this outage began (elapsedRealtime), 0 while playing. */
+    private var reconnectSince = 0L
+
+    /**
+     * Try the channel again after a back-off (1, 2, 4, 8, 15 s, then every
+     * 30 s), re-resolving it each time -- tvtimes' redirect target can
+     * change. Gives up after [GIVE_UP_MS] without a picture, showing
+     * [failure]. A new channel resets it (tune without retry).
+     */
+    private fun reconnect(why: String, failure: String = "Couldn't keep the stream going") {
+        val now = SystemClock.elapsedRealtime()
+        if (reconnectSince == 0L) reconnectSince = now
+        if (now - reconnectSince > GIVE_UP_MS) {
+            Log.w(TAG, "play | ${channel?.name}: giving up after ${(now - reconnectSince) / 1000} s ($why)")
+            status.value = Status.Failed(failure)
+            return
+        }
+        reconnectAttempt++
+        val wait = BACKOFF_MS[minOf(reconnectAttempt - 1, BACKOFF_MS.lastIndex)]
+        Log.i(TAG, "play | ${channel?.name}: $why -> reconnecting in ${wait / 1000} s (attempt $reconnectAttempt)")
+        status.value = Status.Reconnecting(reconnectAttempt)
+        showBanner()
+        player?.stop()
+        reconnectJob?.cancel()
+        reconnectJob = lifecycleScope.launch {
+            delay(wait)
+            tune(delayMs = 0, retry = true)
+        }
     }
 
     private fun showBanner() {
@@ -366,6 +449,17 @@ class PlayerActivity : ComponentActivity() {
         private const val EXTRA_NAME = "name"
         private const val EXTRA_GUIDE = "guide"
         private const val TUNE_DELAY_MS = 450L
+        private val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 15_000, 30_000)
+        private const val GIVE_UP_MS = 10 * 60 * 1000L
+        private const val STALL_MS = 20_000L
+        private val UNRECOVERABLE = setOf(
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
+        )
         private const val BANNER_MS = 5_000L
 
         fun intent(context: Context, channel: Channel, openGuide: Boolean = false): Intent =

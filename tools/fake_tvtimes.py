@@ -9,14 +9,24 @@ loopback as 10.0.2.2.
     python3 tools/fake_tvtimes.py
     adb -s emulator-5554 shell am start -n com.issinoho.radiotimes/.MainActivity \
       --es url "'tvtimes://10.0.2.2:8899?token=testtoken'"
+
+To test reconnecting, `--ts-channel 5` sends channel 5 to a live MPEG-TS
+stream you run (and kill, and restart) yourself:
+
+    ffmpeg -re -f lavfi -i testsrc=size=640x360:rate=25 -f lavfi -i sine \
+      -c:v libx264 -preset ultrafast -tune zerolatency -c:a aac \
+      -f mpegts -listen 1 http://127.0.0.1:8900/live.ts
 """
 import datetime as dt
 import http.server
 import random
+import sys
 
 HOST = "http://10.0.2.2:8899"
 TOKEN = "testtoken"
 HLS = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+TS_CHANNEL = int(sys.argv[sys.argv.index("--ts-channel") + 1]) if "--ts-channel" in sys.argv else None
+TS = "http://10.0.2.2:8900/live.ts"
 GROUPS = ["UK", "News", "Movies", "Sport", "Kids"]
 CH = [(i, f"{GROUPS[i % 5]} {i:02d}", GROUPS[i % 5]) for i in range(1, 61)]
 # Real logos for the first few channels, a mix of kinds: TCM is black on
@@ -63,7 +73,8 @@ class H(http.server.BaseHTTPRequestHandler):
         elif path == "/api/exports/epg.xml":
             body, ct = epg().encode(), "application/xml"
         elif path.startswith("/api/exports/stream/"):
-            self.send_response(302); self.send_header("Location", HLS); self.end_headers(); return
+            target = TS if TS_CHANNEL is not None and path.endswith(f"/{TS_CHANNEL}") else HLS
+            self.send_response(302); self.send_header("Location", target); self.end_headers(); return
         elif path in ("/api/exports/favourites.json", "/api/exports/watchlist.json"):
             body, ct = b"[]", "application/json"
         else:

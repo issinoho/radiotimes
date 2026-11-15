@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Live channels reconnect by themselves.** A dropped or frozen stream
+  is retried automatically (after 1, 2, 4, 8, 15 s, then every 30 s, the
+  stream re-resolved each time) while the banner says "Lost the stream.
+  Reconnecting…"; it gives up after 10 minutes without a picture. Covers
+  network errors, a stream whose connection closes (previously the
+  picture just froze), no progress for 20 s, and falling behind a live
+  window (rejoins live). Formats the device can't decode still fail at
+  once, since retrying can't help.
+
 ## 0.5.1
 
 - **Subtitles on/off in the Plex ☰ panel**: a "Subtitles: On / Off"
