@@ -104,8 +104,21 @@ def server(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             return _FakeResponse(b"", status=404)
         return _FakeResponse(routes[path])
 
+    def fake_post(url: str, *args: object, json: object = None, **kwargs: object) -> _FakeResponse:
+        seen.append(url)
+        assert url.startswith(BASE), f"request went somewhere other than the typed host: {url}"
+        if url[len(BASE) :].split("?", 1)[0] != "/api/exports/watch-events":
+            return _FakeResponse(b"", status=404)
+        POSTED.append(json)
+        return _FakeResponse({"stored": len(json["events"])})
+
+    POSTED.clear()
     monkeypatch.setattr(requests, "get", fake_get)
+    monkeypatch.setattr(requests, "post", fake_post)
     return seen
+
+
+POSTED: list = []
 
 
 @pytest.fixture
@@ -611,3 +624,54 @@ def test_plex_transcode_url_and_stop(plex, monkeypatch) -> None:
     monkeypatch.setattr(requests, "get", get)
     assert json.loads(bridge.plex_transcode_stop(0, "sess-1")) == {"ok": True}
     assert seen == [(f"{PLEX}/video/:/transcode/universal/stop", {"session": "sess-1"})]
+
+
+def _now_ms() -> int:
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+
+def test_watch_recorded_and_reported_with_channel_id(engine, tmp_path) -> None:
+    history = str(tmp_path / "history.jsonl")
+    url = f"{BASE}/api/exports/stream/1?token={TOKEN}"
+    end = _now_ms()
+    assert json.loads(bridge.record_watch(history, url, "Quiz", "BBC One", end - 600_000, end)) == {"recorded": True}
+    result = json.loads(bridge.report_watch(history, "living room"))
+    assert result == {"sent": 1, "stored": 1}
+    (event,) = POSTED[0]["events"]
+    assert event["channel_id"] == "1"
+    assert event["title"] == "Quiz"
+    assert event["device"] == "living room"
+    assert datetime.fromisoformat(event["ended_at"]) == datetime.fromtimestamp(end / 1000, tz=timezone.utc)
+    # The token travels only in the request URL, never the body.
+    assert TOKEN not in json.dumps(POSTED[0])
+
+
+def test_flicking_past_a_channel_is_not_recorded(engine, tmp_path) -> None:
+    history = str(tmp_path / "history.jsonl")
+    end = _now_ms()
+    url = f"{BASE}/api/exports/stream/1?token={TOKEN}"
+    assert json.loads(bridge.record_watch(history, url, "", "BBC One", end - 2_000, end)) == {"recorded": False}
+    assert json.loads(bridge.report_watch(history, "")) == {"sent": 0, "stored": 0}
+    assert POSTED == []
+
+
+def test_report_skips_other_sources_and_old_watches(engine, tmp_path) -> None:
+    history = str(tmp_path / "history.jsonl")
+    end = _now_ms()
+    bridge.record_watch(history, "http://elsewhere/live.m3u8", "Other", "X", end - 600_000, end)
+    week_ago = end - 8 * 86_400_000
+    bridge.record_watch(history, f"{BASE}/api/exports/stream/1?token={TOKEN}", "Old", "BBC One", week_ago - 600_000, week_ago)
+    assert json.loads(bridge.report_watch(history, "")) == {"sent": 0, "stored": 0}
+
+
+def test_report_failure_is_a_redacted_error(engine, tmp_path, monkeypatch) -> None:
+    history = str(tmp_path / "history.jsonl")
+    end = _now_ms()
+    bridge.record_watch(history, f"{BASE}/api/exports/stream/1?token={TOKEN}", "Quiz", "BBC One", end - 600_000, end)
+
+    def down(url: str, *args: object, **kwargs: object) -> None:
+        raise requests.ConnectionError(f"refused {url}")
+
+    monkeypatch.setattr(requests, "post", down)
+    error = json.loads(bridge.report_watch(history, ""))["error"]
+    assert TOKEN not in error

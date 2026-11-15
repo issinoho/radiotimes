@@ -43,14 +43,17 @@ from typing import Any, Callable
 import requests
 from tvdinner import epg as tv_epg
 from tvdinner import plex as tv_plex
+from tvdinner.history import HistoryEntry, append_history_entry, load_history
 from tvdinner.m3u import Channel, Playlist, load_playlist
 from tvdinner.tvtimes import (
     TvtimesFeed,
     fetch_tvtimes_favourites,
     fetch_tvtimes_watchlist,
     parse_tvtimes_url,
+    post_watch_events,
     tvtimes_epg_url,
     tvtimes_playlist_url,
+    watch_events_payload,
 )
 
 # Case-insensitive: tvtimes uses `token=`, Plex `X-Plex-Token=`.
@@ -379,6 +382,60 @@ def watchlist() -> str:
             for e in entries
         ]
     )
+
+
+# --------------------------------------------------------------------------
+# Watch reporting
+#
+# The same scheme as tvdinner's --report-watch-state: every live watch is
+# appended to a local history log (tvdinner's own JSONL format), and the
+# last week of it is posted to tvtimes' /api/exports/watch-events -- the one
+# write an export token allows. tvtimes dedupes on (channel, start), so the
+# whole window is resent each time and there is no "already reported"
+# bookkeeping to get out of step across restarts or outages.
+
+_WATCH_REPORT_WINDOW = timedelta(days=7)
+
+
+def _utc(ms: int) -> datetime:
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+
+
+@_guarded
+def record_watch(history_path: str, stream_url: str, title: str, channel_name: str, start_ms: int, end_ms: int) -> str:
+    """Append one live watch to the history log. `title` is the programme on
+    when it started (else the channel name). Watches under tvdinner's
+    minimum (5 s: flicking past) aren't kept. Returns {"recorded": bool}."""
+    entry = HistoryEntry(
+        kind="channel",
+        title=title or channel_name,
+        url=stream_url,
+        playlist_source=_feed.base_url if _feed else None,
+        started_at=_utc(int(start_ms)),
+        ended_at=_utc(int(end_ms)),
+        channel_name=channel_name or None,
+    )
+    append_history_entry(Path(history_path), entry)
+    return _ok({"recorded": entry.duration_seconds >= 5.0})
+
+
+@_guarded
+def report_watch(history_path: str, device: str) -> str:
+    """Post the last week's live watches from this tvtimes source.
+    Returns {"sent": n, "stored": n}; nothing to send is not an error."""
+    feed = _require_feed()
+    entries, warnings = load_history(Path(history_path))
+    for warning in warnings:
+        sys.stderr.write(redact(f"watch report: {warning}\n"))
+    events = watch_events_payload(
+        feed, entries, device=device or None, since=datetime.now(timezone.utc) - _WATCH_REPORT_WINDOW
+    )
+    if not events:
+        return _ok({"sent": 0, "stored": 0})
+    stored, error = post_watch_events(feed, events)
+    if error:
+        return _err(error)
+    return _ok({"sent": len(events), "stored": stored})
 
 
 # --------------------------------------------------------------------------

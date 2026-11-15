@@ -198,6 +198,12 @@ class PlayerActivity : ComponentActivity() {
                 )
                 val wasReconnecting = status.value is Status.Reconnecting
                 status.value = Status.Playing
+                lastPlaying = System.currentTimeMillis()
+                // A reconnect carries on the same watch; a new channel starts one.
+                if (watching?.channel?.url != channel?.url) {
+                    endWatch()
+                    channel?.let { watching = Watching(it, lastPlaying, Tv.nowNext.value[it.url]?.now) }
+                }
                 settledUrl = channel?.url
                 if (wasReconnecting) Log.i(TAG, "play | ${channel?.name}: reconnected after $reconnectAttempt attempt(s)")
                 reconnectAttempt = 0
@@ -241,6 +247,10 @@ class PlayerActivity : ComponentActivity() {
                 delay(2_000)
                 val p = player ?: continue
                 val now = SystemClock.elapsedRealtime()
+                if (status.value == Status.Playing && p.currentPosition != lastPosition) {
+                    lastPlaying = System.currentTimeMillis()
+                    splitWatchAtProgrammeEnd()
+                }
                 if (status.value != Status.Playing || !p.playWhenReady || p.currentPosition != lastPosition) {
                     lastPosition = p.currentPosition
                     lastMoved = now
@@ -254,6 +264,7 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        endWatch()
         tuneJob?.cancel()
         reconnectJob?.cancel()
         stallJob?.cancel()
@@ -297,6 +308,7 @@ class PlayerActivity : ComponentActivity() {
     private fun tune(delayMs: Long, retry: Boolean = false) {
         val target = channel ?: return
         if (!retry) {
+            endWatch()
             // A new channel (or a fresh start) begins with a clean slate.
             reconnectJob?.cancel()
             reconnectAttempt = 0
@@ -357,6 +369,35 @@ class PlayerActivity : ComponentActivity() {
 
     private var reconnectJob: Job? = null
     private var stallJob: Job? = null
+
+    /**
+     * The live watch being timed for tvtimes' watch history: from the first
+     * frame to leaving the channel (or the player), cut at programme ends
+     * so each interval carries the right title. [lastPlaying] (wall clock,
+     * refreshed while the picture moves) is where a watch ends, so time
+     * spent reconnecting or frozen before leaving isn't counted.
+     */
+    private class Watching(val channel: Channel, var start: Long, var programme: Programme?)
+    private var watching: Watching? = null
+    private var lastPlaying = 0L
+
+    private fun endWatch() {
+        val w = watching ?: return
+        watching = null
+        val end = if (status.value == Status.Playing) System.currentTimeMillis() else lastPlaying
+        Tv.recordWatch(w.channel, w.programme?.title, w.start, end)
+    }
+
+    private fun splitWatchAtProgrammeEnd() {
+        val w = watching ?: return
+        val stop = w.programme?.stop ?: return
+        if (lastPlaying < stop) return
+        Tv.recordWatch(w.channel, w.programme?.title, w.start, stop)
+        val nn = Tv.nowNext.value[w.channel.url]
+        w.start = stop
+        w.programme = listOfNotNull(nn?.now, nn?.next).firstOrNull { it.start <= lastPlaying && it.stop > lastPlaying }
+    }
+
     private var reconnectAttempt = 0
     /** When this outage began (elapsedRealtime), 0 while playing. */
     private var reconnectSince = 0L

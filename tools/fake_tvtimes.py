@@ -84,6 +84,17 @@ def watchlist():
 
 
 class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        # Watch reporting: print what arrives, store nothing (tvtimes dedupes).
+        if f"token={TOKEN}" not in self.path or self.path.split("?")[0] != "/api/exports/watch-events":
+            return self.send_error(403)
+        events = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)))).get("events", [])
+        for e in events:
+            print(f"watch-event | channel {e['channel_id']} {e['started_at']} → {e['ended_at']} "
+                  f"{e['title']!r} device={e['device']!r}", flush=True)
+        body = json.dumps({"stored": len(events)}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
     def do_GET(self):
         path = self.path.split("?")[0]
         if f"token={TOKEN}" not in self.path:

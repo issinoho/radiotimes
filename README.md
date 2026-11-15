@@ -11,30 +11,43 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   XMLTV parsing and caching, now/next, and the tvtimes feeds.
 - **The app** adds a 10-foot interface and plays streams with Media3/ExoPlayer.
 
-## Status: Phase 1 — live TV
+## What it does
 
 - **Setup:** a first-run wizard (Welcome → tvtimes → Plex → Ready).
-  Scan the QR code on the TV and paste your links on your phone; or **Link Plex account** (enter the code at plex.tv/link: every
-  server on the account is added, no tokens); or type them with the
-  remote, or send them from a computer (below).
+  Scan the QR code on the TV (or open the address it shows on any phone
+  or computer on your network) and paste your links there; or **Link
+  Plex account** (enter the code at plex.tv/link: every server on the
+  account is added, no tokens); or type them with the remote, or send
+  them from a computer (below).
 - **Channel list:** groups down the left, channels with logo and what's on
-  now, details of the focused channel on the right. The guide shows at once
-  from cache and refreshes in the background when it's over 6 hours old.
-- **Player:** fullscreen live TV with a now/next banner.
-- **Plex:** each Plex server is an entry in the group rail. Search, On
-  Deck and libraries as poster grids (each library with **All**,
-  **Recently Added** and **Recently Released** tabs), shows → seasons → episodes. OK on a
-  movie or episode opens its details (summary, cast, director, genres,
-  runtime, file quality, progress) with **Resume** / **Play from the
-  start**. Plays the file directly with a seek bar; **Skip intro** /
-  **Skip credits** (or **Next episode**) at Plex's markers; audio and
-  subtitle tracks, including Plex's sidecar subtitle files, from the
-  player's ⚙ and CC menus; **subtitles found online** through the Plex
-  server's own search (☰ → Find subtitles online); progress reported back to Plex; the next
-  episode starts when one ends.
+  now, details of the focused channel on the right. **★ Favourites** and
+  **Watchlist** groups come from your tvtimes account (the watchlist as
+  upcoming airings: "Today 21:00 · Title"). The guide shows at once from
+  cache and refreshes in the background when it's over 6 hours old.
+- **Live TV:** fullscreen with a now/next banner; ↑/↓ change channel, ◀
+  goes back to the previous one. A dropped or frozen stream reconnects
+  by itself (giving up after 10 minutes).
 - **Guide:** ☰ opens a channels × time grid over the picture, which keeps
   playing in the corner; OK previews a channel, OK again shows the
   programme's full details.
+- **Watch history in tvtimes:** what you watch live is reported back to
+  your tvtimes account (as tvdinner's `--report-watch-state` does), so its
+  web guide can show what's been watched. Only channels from your tvtimes
+  link are sent, as start/stop times with the device's name.
+- **Plex:** each Plex server is an entry in the group rail. Search, On
+  Deck and libraries as poster grids (each library with **All**,
+  **Recently Added** and **Recently Released** tabs), shows → seasons →
+  episodes. OK on a movie or episode opens its details (summary, cast,
+  director, genres, runtime, file quality, progress) with **Resume** /
+  **Play from the start**. Plays the file directly with a seek bar, or,
+  when the device can't decode it, a version your Plex server converts
+  on the fly. **Skip intro** / **Skip credits** (or **Next episode**) at
+  Plex's markers; audio and subtitle tracks, including Plex's sidecar
+  subtitle files; **subtitles found online** through the Plex server's
+  own search (☰ → Find subtitles online); progress reported back to
+  Plex; the next episode starts when one ends.
+- **Updates:** when a newer release is out, the channel list says so,
+  with the Downloader code to fetch it.
 
 Phase 0 measured the engine on a Fire TV Stick (Fire OS 8, 32-bit ARM):
 channel list 0.4 s, guide from cache 0.4 s, fresh guide ~15 s for an 11.6 MB
@@ -42,15 +55,13 @@ XMLTV feed, first frame 2.1 s.
 
 ### Roadmap
 
-Done: 0 engine probe → 1 live TV → 2 guide over the picture → 3 Plex
-(details, resume, skip intro/credits, tracks, search) → setup from a
-phone and plex.tv/link.
+Done: engine probe → live TV → guide over the picture → Plex (details,
+resume, skip intro/credits, tracks, search, transcode fallback) → setup
+from a phone and plex.tv/link → signed releases and the Downloader code
+→ tvtimes favourites, watchlist and watch reporting.
 
-Next:
+Next (each needs a change outside radiotimes):
 
-- **Releases**: signed APKs on GitHub Releases, installable on a Fire TV
-  with the Downloader app's short code.
-- **tvtimes sync**: favourites, watchlist, watch reporting.
 - **Find-and-approve pairing** *(needs a tvtimes change)*: tvtimes
   advertises itself on the LAN (mDNS); the TV finds it, shows a code,
   you approve it in tvtimes' Settings → Devices, and tvtimes issues the
@@ -59,14 +70,14 @@ Next:
   radiotimes advertises itself on the LAN; tvdinner's bookmarks screen
   pushes chosen tvtimes/Plex bookmarks to it in one keypress.
 - **plex.tv linking in tvdinner itself**, so both apps share it.
-- **Phone setup when the phone can't reach the TV** *(open issue)*: on
-  the author's phone the QR page fails with ERR_TOO_MANY_RETRIES. That
-  phone pings the TV but can't open a TCP connection to any device on the
-  LAN (a test page on a laptop failed the same way, and a port scan of
-  the TV showed even adb's port closed) -- something on the phone (a VPN
-  or firewall app) blocks local connections. radiotimes can't fix that
-  from the TV; the tvtimes pairing above would avoid the LAN path
-  entirely.
+
+Open issue: **phone setup when the phone can't reach the TV**. On the
+author's phone the QR page fails with ERR_TOO_MANY_RETRIES. That phone
+pings the TV but can't open a TCP connection to any device on the LAN
+(a test page on a laptop failed the same way), so something on the
+phone (a VPN or firewall app) blocks local connections; a laptop on the
+same network opens the page fine. radiotimes can't fix that from the
+TV; the tvtimes pairing above would avoid the LAN path entirely.
 
 ### Remote
 
@@ -108,7 +119,8 @@ Next:
 3. In Downloader, enter the code **8716486** (or the address it stands
    for, which always fetches the latest release:
    `https://github.com/issinoho/radiotimes/releases/latest/download/radiotimes.apk`).
-4. Install, open radiotimes, and scan the QR code with your phone.
+4. Install, open radiotimes, and scan the QR code with your phone (or
+   open the address shown under it on a computer).
 
 **With adb (developers):** turn on **ADB debugging** too, note the Stick's
 IP under *About → Network*, then from a computer on the same network:

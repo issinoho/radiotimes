@@ -45,6 +45,7 @@ object Tv {
     private const val REFRESH_AFTER_MS = 6 * 60 * 60 * 1000L
     private const val TICK_MS = 60 * 1000L
     private const val ACCOUNT_EVERY_TICKS = 15
+    private const val REPORT_DELAY_MS = 60 * 1000L
     private const val RETRY_AFTER_MS = 15 * 60 * 1000L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -79,6 +80,46 @@ object Tv {
 
     fun init(context: Context) {
         if (_lastPlayed.value == null) _lastPlayed.value = Prefs.lastPlayed(context)
+        historyPath = java.io.File(context.filesDir, "history.jsonl").absolutePath
+        deviceName = android.provider.Settings.Global.getString(context.contentResolver, "device_name")
+            ?.ifBlank { null } ?: android.os.Build.MODEL
+    }
+
+    // ---- watch reporting (tvdinner's --report-watch-state scheme) ----
+
+    private var historyPath: String? = null
+    private var deviceName: String = ""
+    private var reportJob: Job? = null
+
+    /**
+     * Log a live watch (tvdinner skips anything under 5 s) and report soon
+     * after: a minute after the last one, so a burst of zapping is one post.
+     * Only channels from the tvtimes link are ever sent; tvtimes works out
+     * which programmes the intervals cover.
+     */
+    fun recordWatch(channel: Channel, programme: String?, start: Long, end: Long) {
+        val path = historyPath ?: return
+        scope.launch {
+            val r = Engine.call("record_watch", path, channel.url, programme.orEmpty(), channel.name, start, end)
+            bridgeError(r)?.let { Log.w(TAG, "watch | couldn't record: ${redactTokens(it)}"); return@launch }
+            if (!JSONObject(r).optBoolean("recorded")) return@launch
+            Log.i(TAG, "watch | ${channel.name} ${(end - start) / 1000} s${programme?.let { " · $it" } ?: ""}")
+            reportJob?.cancel()
+            reportJob = scope.launch {
+                delay(REPORT_DELAY_MS)
+                reportWatches()
+            }
+        }
+    }
+
+    /** Post the last week of watches; tvtimes dedupes, so resending is the design. */
+    private suspend fun reportWatches() {
+        val path = historyPath ?: return
+        if (_lineup.value !is Lineup.Ready) return
+        val r = Engine.call("report_watch", path, deviceName)
+        bridgeError(r)?.let { Log.w(TAG, "watch | report failed (will resend): ${redactTokens(it)}"); return }
+        val o = JSONObject(r)
+        if (o.optInt("sent") > 0) Log.i(TAG, "watch | reported to tvtimes: ${o.optInt("stored")}/${o.optInt("sent")} intervals accepted")
     }
 
     fun played(context: Context, channel: Channel) {
@@ -115,7 +156,10 @@ object Tv {
                 delay(TICK_MS)
                 if (needsRefresh()) loadGuide("refresh") else refreshNowNext()
                 // Favourites and watchlist change in tvtimes; look again every 15 min.
-                if (++ticks % ACCOUNT_EVERY_TICKS == 0) refreshAccount()
+                if (++ticks % ACCOUNT_EVERY_TICKS == 0) {
+                    refreshAccount()
+                    reportWatches()
+                }
             }
         }
     }

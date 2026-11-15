@@ -52,6 +52,11 @@ from CI.
   carry `X-Plex-Token` (they must, for ExoPlayer and Coil); never log them.
   Plex links reach the app via Settings or `--es plex`, never the repo.
 - **No tvtimes changes are assumed.** The app uses only `/api/exports/*`.
+  Watch reporting is the one write (`POST /api/exports/watch-events`,
+  via tvdinner's `watch_events_payload`/`post_watch_events`); the local
+  log is tvdinner's `history.jsonl` format in `filesDir` (app-private:
+  its entries hold tokenised stream URLs). tvtimes dedupes on
+  (channel, start), so resending the last week is the design, not a bug.
 - **The phone setup server (`SetupServer`) only runs while the setup
   screen is open** and only answers requests carrying its one-time code.
   Keep both properties.

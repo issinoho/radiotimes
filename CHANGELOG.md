@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Watch history in tvtimes**: what you watch on live TV is reported
+  back to your tvtimes account, like tvdinner's `--report-watch-state`,
+  so tvtimes can show what's been watched. Each watch is sent as start
+  and stop times (cut at programme boundaries, under 5 s ignored) with
+  the Fire TV's name; only channels from your tvtimes link, a minute
+  after you stop watching and every 15 minutes. tvtimes ignores repeats,
+  so the last week is resent each time and nothing is lost to an outage.
+
 ## 0.6.0
 
 - **Live channels reconnect by themselves.** A dropped or frozen stream
