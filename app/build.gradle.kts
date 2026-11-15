@@ -25,6 +25,19 @@ android {
         }
     }
 
+    signingConfigs {
+        // A fixed, deliberately public debug key. Without it every CI run
+        // signs with a fresh one and Android refuses to install a build over
+        // the previous one (INSTALL_FAILED_UPDATE_INCOMPATIBLE), which means
+        // uninstalling -- and losing the saved tvtimes link -- every time.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
