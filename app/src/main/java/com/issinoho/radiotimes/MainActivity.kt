@@ -14,8 +14,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 
 /**
- * Setup (once) and the channel list. The ☰ menu key reopens setup to
- * change the tvtimes link.
+ * Setup (once) and the channel list. ☰ opens the guide (over the focused
+ * channel, playing); Settings at the foot of the group rail reopens setup.
  *
  * The link can also be sent from a computer, which saves typing a token
  * with the remote; this works whether or not the app is already open:
@@ -26,6 +26,7 @@ class MainActivity : ComponentActivity() {
     private enum class Screen { Setup, Channels }
 
     private val screen = mutableStateOf(Screen.Channels)
+    private var focusedChannel: Pair<Channel, List<Channel>>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
                                 nowNext = nowNext,
                                 lastPlayed = lastPlayed,
                                 onPlay = { channel, list -> play(channel, list) },
+                                onFocusChannel = { channel, list -> focusedChannel = channel to list },
                                 onRetry = { Prefs.tvtimesUrl(this)?.let { connect(it) } },
                                 onChangeLink = { screen.value = Screen.Setup },
                             )
@@ -94,15 +96,16 @@ class MainActivity : ComponentActivity() {
         screen.value = Screen.Channels
     }
 
-    private fun play(channel: Channel, list: List<Channel>) {
+    private fun play(channel: Channel, list: List<Channel>, openGuide: Boolean = false) {
         Tv.zapList = list
         Tv.played(this, channel)
-        startActivity(PlayerActivity.intent(this, channel))
+        startActivity(PlayerActivity.intent(this, channel, openGuide))
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // ☰ on the channel list: watch the focused channel with the guide up.
         if (event.keyCode == KeyEvent.KEYCODE_MENU && screen.value == Screen.Channels) {
-            if (event.action == KeyEvent.ACTION_UP) screen.value = Screen.Setup
+            if (event.action == KeyEvent.ACTION_UP) focusedChannel?.let { (c, list) -> play(c, list, openGuide = true) }
             return true
         }
         return super.dispatchKeyEvent(event)

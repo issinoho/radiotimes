@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -78,6 +79,8 @@ class PlayerActivity : ComponentActivity() {
     private val index = mutableIntStateOf(0)
     private val status = mutableStateOf<Status>(Status.Tuning)
     private val bannerVisible = mutableStateOf(true)
+    private val guideOpen = mutableStateOf(false)
+    private val guideInfo = mutableStateOf<GuideInfo?>(null)
     private var tuneJob: Job? = null
     private var bannerJob: Job? = null
     private var tuneStarted = 0L
@@ -95,11 +98,25 @@ class PlayerActivity : ComponentActivity() {
             ?: Tv.channels().takeIf { list -> list.any { it.url == url } }
             ?: listOf(Channel(0, intent.getStringExtra(EXTRA_NAME).orEmpty(), url, null, null))
         index.intValue = lineup.indexOfFirst { it.url == url }.coerceAtLeast(0)
+        guideOpen.value = intent.getBooleanExtra(EXTRA_GUIDE, false)
 
         setContent {
             RadiotimesTheme {
                 val nowNext by Tv.nowNext.collectAsState()
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
+                    // The guide is drawn underneath and the video stays the
+                    // same AndroidView, just resized into the corner, so the
+                    // stream keeps playing without re-attaching a surface.
+                    if (guideOpen.value) {
+                        Guide(
+                            channels = lineup,
+                            currentIndex = index.intValue,
+                            info = guideInfo.value,
+                            onInfo = { guideInfo.value = it },
+                            onTune = ::preview,
+                            onWatch = ::watch,
+                        )
+                    }
                     AndroidView(
                         factory = { ctx ->
                             PlayerView(ctx).apply {
@@ -111,11 +128,18 @@ class PlayerActivity : ComponentActivity() {
                                 view = this
                             }
                         },
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = if (guideOpen.value) {
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 20.dp, end = 32.dp)
+                                .size(GuideVideoWidth, GuideVideoHeight)
+                        } else {
+                            Modifier.fillMaxSize()
+                        },
                     )
                     val current = channel
                     AnimatedVisibility(
-                        visible = bannerVisible.value || status.value is Status.Failed,
+                        visible = !guideOpen.value && (bannerVisible.value || status.value is Status.Failed),
                         enter = fadeIn(),
                         exit = fadeOut(),
                         modifier = Modifier.align(Alignment.BottomCenter),
@@ -232,6 +256,26 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
+    /** From the guide: tune that channel in the corner, guide stays open. */
+    private fun preview(i: Int) {
+        index.intValue = i
+        channel?.let { Tv.played(this, it) }
+        tune(delayMs = 0)
+    }
+
+    /** From the guide: tune that channel (if it isn't already) and go back to full screen. */
+    private fun watch(i: Int) {
+        guideOpen.value = false
+        guideInfo.value = null
+        if (i == index.intValue && status.value != Status.Tuning && status.value !is Status.Failed) {
+            showBanner()
+            return
+        }
+        index.intValue = i
+        channel?.let { Tv.played(this, it) }
+        tune(delayMs = 0)
+    }
+
     private fun showBanner() {
         bannerVisible.value = true
         bannerJob?.cancel()
@@ -253,6 +297,30 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_MENU || (guideOpen.value && event.keyCode == KeyEvent.KEYCODE_BACK)) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                when {
+                    // Back steps out of the info panel first.
+                    event.keyCode == KeyEvent.KEYCODE_BACK && guideInfo.value != null -> guideInfo.value = null
+                    else -> {
+                        guideOpen.value = !guideOpen.value && event.keyCode == KeyEvent.KEYCODE_MENU
+                        guideInfo.value = null
+                        if (!guideOpen.value) showBanner()
+                    }
+                }
+            }
+            return true
+        }
+        // With the guide open, the D-pad and OK belong to it -- except that
+        // the info panel freezes the grid under it (OK still reaches the
+        // focused cell, which then means "watch").
+        if (guideOpen.value) {
+            val arrow = event.keyCode in intArrayOf(
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            )
+            if (guideInfo.value != null && arrow) return true
+            return super.dispatchKeyEvent(event)
+        }
         val handled = when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { if (down(event)) zap(+1); true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { if (down(event)) zap(-1); true }
@@ -277,13 +345,15 @@ class PlayerActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_URL = "url"
         private const val EXTRA_NAME = "name"
+        private const val EXTRA_GUIDE = "guide"
         private const val TUNE_DELAY_MS = 450L
         private const val BANNER_MS = 5_000L
 
-        fun intent(context: Context, channel: Channel): Intent =
+        fun intent(context: Context, channel: Channel, openGuide: Boolean = false): Intent =
             Intent(context, PlayerActivity::class.java)
                 .putExtra(EXTRA_URL, channel.url)
                 .putExtra(EXTRA_NAME, channel.name)
+                .putExtra(EXTRA_GUIDE, openGuide)
     }
 }
 

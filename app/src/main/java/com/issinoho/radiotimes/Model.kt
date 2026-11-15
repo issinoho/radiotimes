@@ -20,6 +20,7 @@ data class Programme(
     val description: String?,
     val category: String?,
     val year: String?,
+    val poster: String? = null,
 ) {
     fun progress(now: Long): Float =
         if (stop <= start) 0f else ((now - start).toFloat() / (stop - start)).coerceIn(0f, 1f)
@@ -52,6 +53,7 @@ private fun parseProgramme(o: JSONObject?): Programme? = o?.let {
         description = it.optStringOrNull("description"),
         category = it.optStringOrNull("category"),
         year = it.optStringOrNull("year"),
+        poster = it.optStringOrNull("poster"),
     )
 }
 
@@ -63,6 +65,11 @@ fun parseNowNext(json: String): Map<String, NowNext> {
         out[url] = NowNext(parseProgramme(e.optJSONObject("now")), parseProgramme(e.optJSONObject("next")))
     }
     return out
+}
+
+fun parseProgrammes(json: String): List<Programme> {
+    val arr = JSONArray(json)
+    return (0 until arr.length()).mapNotNull { parseProgramme(arr.optJSONObject(it)) }
 }
 
 /** A bridge result is either the payload or `{"error": "..."}`. */

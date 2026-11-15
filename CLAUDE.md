@@ -65,6 +65,10 @@ from CI.
 - 1080p at TV density is only 960dp wide: budget columns against that.
 - Don't use Compose's `focusRestorer` on lazy lists (Compose 1.7 crashes
   with "Release should only be called once"); use `focusProperties { enter }`.
+- Don't move focus into an overlay and back (Compose drops it on the
+  first item in view when the overlay goes, before any restore runs):
+  keep focus where it is, draw the overlay, and gate keys in the
+  activity, as the guide's info panel does.
 - Never start focus on a text field: selecting it opens Fire TV's
   full-screen keyboard, which Back doesn't reliably dismiss.
 

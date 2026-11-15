@@ -18,13 +18,17 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   now, details of the focused channel on the right. The guide shows at once
   from cache and refreshes in the background when it's over 6 hours old.
 - **Player:** fullscreen live TV with a now/next banner.
+- **Guide:** ☰ opens a channels × time grid over the picture, which keeps
+  playing in the corner; OK previews a channel, OK again shows the
+  programme's full details.
 
 Phase 0 measured the engine on a Fire TV Stick (Fire OS 8, 32-bit ARM):
 channel list 0.4 s, guide from cache 0.4 s, fresh guide ~15 s for an 11.6 MB
 XMLTV feed, first frame 2.1 s.
 
-Roadmap: 0 probe ✓ → **1 live TV** → 2 guide grid →
-3 tvtimes sync (favourites, watchlist, watch reporting) → 4 polish.
+Roadmap: 0 probe ✓ → 1 live TV ✓ → 2 guide grid ✓ → **Plex** (via
+tvdinner's Plex client) → tvtimes sync (favourites, watchlist, watch
+reporting) → polish.
 
 ### Remote
 
@@ -32,10 +36,17 @@ Roadmap: 0 probe ✓ → **1 live TV** → 2 guide grid →
 |---|---|---|
 | Channel list | ↑ ↓ ← → | move between groups and channels |
 | | OK | play |
-| | ☰ (menu) | change the tvtimes link |
+| | ☰ (menu) | play the focused channel with the guide open |
+| | Settings (foot of the groups) | change the tvtimes link |
 | Player | ↑ / ↓, CH+ / CH− | next / previous channel in the group |
 | | OK | show or hide what's on |
+| | ☰ | guide, with the channel still playing in the corner |
 | | Back | back to the list |
+| Guide | ↑ ↓ ← → | move through channels and time (2 h at a time, 24 h ahead) |
+| | OK | preview that channel in the corner |
+| | OK again | full programme details |
+| | OK in details | watch full screen |
+| | Back / ☰ | details → guide → full screen |
 
 ## Install on a Fire TV Stick
 

@@ -58,6 +58,7 @@ fun ChannelsScreen(
     nowNext: Map<String, NowNext>,
     lastPlayed: String?,
     onPlay: (Channel, List<Channel>) -> Unit,
+    onFocusChannel: (Channel, List<Channel>) -> Unit,
     onRetry: () -> Unit,
     onChangeLink: () -> Unit,
 ) {
@@ -79,7 +80,7 @@ fun ChannelsScreen(
                     LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
                 }
             }
-            is Tv.Lineup.Ready -> Lineup(lineup.channels, nowNext, lastPlayed, now, onPlay)
+            is Tv.Lineup.Ready -> Lineup(lineup.channels, nowNext, lastPlayed, now, onPlay, onFocusChannel, onChangeLink)
         }
     }
 }
@@ -107,7 +108,7 @@ private fun Header(guide: Tv.Guide, lineup: Tv.Lineup, now: Long) {
             }
         }
         Spacer(Modifier.weight(1f))
-        Text("☰ menu: tvtimes link", color = Palette.dim, fontSize = 13.sp)
+        Text("☰ guide", color = Palette.dim, fontSize = 13.sp)
         Spacer(Modifier.width(20.dp))
         Text(clockText(now), color = Palette.text, fontSize = 22.sp)
     }
@@ -121,6 +122,8 @@ private fun Lineup(
     lastPlayed: String?,
     now: Long,
     onPlay: (Channel, List<Channel>) -> Unit,
+    onFocusChannel: (Channel, List<Channel>) -> Unit,
+    onSettings: () -> Unit,
 ) {
     val groups = remember(channels) { groupsOf(channels) }
     var group by rememberSaveable { mutableStateOf(ALL) }
@@ -182,6 +185,7 @@ private fun Lineup(
                     modifier = if (i == selectedIndex) Modifier.focusRequester(selectedGroupRequester) else Modifier,
                 )
             }
+            item(key = "settings") { SettingsRow(onSettings) }
         }
         LazyColumn(
             state = listState,
@@ -195,12 +199,33 @@ private fun Lineup(
                     nowNext = nowNext[channel.url],
                     now = now,
                     modifier = if (index == target) Modifier.focusRequester(targetRequester) else Modifier,
-                    onFocused = { focused = channel },
+                    onFocused = {
+                        focused = channel
+                        onFocusChannel(channel, shown)
+                    },
                     onClick = { onPlay(channel, shown) },
                 )
             }
         }
         Details(focused?.takeIf { it in shown }, focused?.let { nowNext[it.url] }, now, Modifier.width(280.dp).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun SettingsRow(onClick: () -> Unit) {
+    var hasFocus by remember { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .padding(top = 14.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (hasFocus) Palette.focus else Color.Transparent)
+            .onFocusChanged { hasFocus = it.isFocused }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+    ) {
+        Text("⚙  Settings", color = if (hasFocus) Palette.text else Palette.dim, fontSize = 15.sp)
     }
 }
 
