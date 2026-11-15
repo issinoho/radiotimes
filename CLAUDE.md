@@ -87,6 +87,18 @@ There is no way to reach the Stick from here. The user sideloads the CI
 APK and pastes `adb logcat -s radiotimes python.stderr`. Give complete
 commands (package `com.issinoho.radiotimes`).
 
+## Releases
+
+Bump `versionCode`/`versionName` in `app/build.gradle.kts`, add a
+`## <version>` section to `CHANGELOG.md` (it becomes the release notes),
+commit, then tag `v<versionName>` and push the tag. `release.yml` checks
+the tag matches, signs with the release key from the
+`RELEASE_KEYSTORE_B64`/`RELEASE_KEYSTORE_PASSWORD` secrets (the key
+itself is kept off the repo), and attaches `radiotimes.apk`, which
+`releases/latest/download/radiotimes.apk` (the Downloader code's target)
+always serves. Release builds are signed with a different key from CI
+debug builds, so switching between the two needs an uninstall.
+
 ## Commits
 
 Explain why, record what was verified and how.

@@ -14,8 +14,8 @@ android {
         // Fire OS 7 is Android 9 (API 28); Fire OS 8 is Android 11.
         minSdk = 28
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0-dev"
+        versionCode = 3
+        versionName = "0.3.0"
 
         ndk {
             // Older Fire TV Sticks are 32-bit ARM, newer ones 64-bit; x86_64
@@ -36,11 +36,24 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+        // Releases: a private key, never in the repo. CI decodes it from
+        // the RELEASE_KEYSTORE_B64 secret (.github/workflows/release.yml);
+        // without these variables release builds are left unsigned.
+        val releaseStore = System.getenv("RELEASE_KEYSTORE")
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = "radiotimes"
+                keyPassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 

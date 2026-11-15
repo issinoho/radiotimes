@@ -1,0 +1,56 @@
+name: release
+
+# Push a tag v<versionName> (e.g. v0.3.0) to publish a signed APK. Each
+# release carries it twice: radiotimes-<version>.apk, and radiotimes.apk,
+# so that
+#   https://github.com/issinoho/radiotimes/releases/latest/download/radiotimes.apk
+# always serves the newest one (what the Fire TV Downloader code points at).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests==2.32.3 pytest
+      - run: python -m pytest -q python-tests
+        env:
+          PYTHONPATH: app/src/main/python:vendor/tvdinner/src
+      - name: Tag matches versionName
+        run: |
+          v=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != versionName $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - name: Release keystore
+        run: |
+          echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew --no-daemon assembleRelease
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          test -f "$apk" || { echo "no signed APK (is RELEASE_KEYSTORE_B64 set?)"; exit 1; }
+          cp "$apk" radiotimes.apk
+          cp "$apk" "radiotimes-$VERSION.apk"
+          gh release create "$GITHUB_REF_NAME" radiotimes.apk "radiotimes-$VERSION.apk" \
+            --title "radiotimes $VERSION" --notes-file <(sed -n "/^## $VERSION/,/^## /p" CHANGELOG.md | sed '1d;$d')

@@ -85,18 +85,25 @@ Next:
 
 ## Install on a Fire TV Stick
 
-1. On the Stick: *Settings → My Fire TV → Developer options* → turn on
-   **ADB debugging** and **Install unknown apps** (on Fire OS 8, tap *About →
-   Fire TV Stick* seven times to reveal Developer options). Note the Stick's IP
-   under *About → Network*.
-2. Download `radiotimes-debug-apk` from the latest
-   [build run](../../actions/workflows/build.yml) and unzip it.
-3. From a computer on the same network:
+**With the Downloader app (no computer needed):**
 
-   ```sh
-   adb connect <stick-ip>:5555        # accept the prompt on the TV
-   adb install -r app-debug.apk
-   ```
+1. On the Fire TV: *Settings → My Fire TV → Developer options* → turn on
+   **Install unknown apps** for Downloader (on Fire OS 8, tap *About →
+   Fire TV Stick* seven times first to reveal Developer options).
+2. Install **Downloader** (by AFTVnews) from the Amazon Appstore.
+3. In Downloader, enter the radiotimes code (see the
+   [tvdinner site](https://tvdinner.issinoho.com/#radiotimes)) or this
+   address, which always fetches the latest release:
+   `https://github.com/issinoho/radiotimes/releases/latest/download/radiotimes.apk`
+4. Install, open radiotimes, and scan the QR code with your phone.
+
+**With adb (developers):** turn on **ADB debugging** too, note the Stick's
+IP under *About → Network*, then from a computer on the same network:
+
+```sh
+adb connect <stick-ip>:5555        # accept the prompt on the TV
+adb install -r radiotimes.apk      # a release, or app-debug.apk from a CI run
+```
 
 4. Open radiotimes from *Your Apps & Channels*. Typing the token with the
    remote is slow, so you can send your tvtimes link (Settings → Export
