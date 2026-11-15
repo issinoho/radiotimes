@@ -151,7 +151,8 @@ class PlayerActivity : ComponentActivity() {
                             Status.Playing -> null
                             is Status.Failed -> st.message
                         }
-                        if (current != null) Banner(current, nowNext[current.url], line, failed = status.value is Status.Failed)
+                        val previous = previousUrl.value?.let { url -> lineup.firstOrNull { it.url == url } }
+                        if (current != null) Banner(current, nowNext[current.url], line, failed = status.value is Status.Failed, previous = previous)
                     }
                 }
             }
@@ -197,6 +198,7 @@ class PlayerActivity : ComponentActivity() {
                 )
                 val wasReconnecting = status.value is Status.Reconnecting
                 status.value = Status.Playing
+                settledUrl = channel?.url
                 if (wasReconnecting) Log.i(TAG, "play | ${channel?.name}: reconnected after $reconnectAttempt attempt(s)")
                 reconnectAttempt = 0
                 reconnectSince = 0L
@@ -260,9 +262,34 @@ class PlayerActivity : ComponentActivity() {
         player = null
     }
 
+    /** The channel last actually playing (first frame seen), and the one before it -- for ◀. */
+    private var settledUrl: String? = null
+    private val previousUrl = mutableStateOf<String?>(null)
+
+    /** Remember where we're leaving from, if it really played (not each channel raced past). */
+    private fun noteLeaving(to: Int) {
+        val settled = settledUrl ?: return
+        if (lineup.getOrNull(to)?.url != settled) previousUrl.value = settled
+    }
+
+    /** ◀ / Last: back to the channel watched before this one. */
+    private fun flipBack() {
+        val i = lineup.indexOfFirst { it.url == previousUrl.value }
+        if (i < 0 || i == index.intValue) {
+            showBanner()
+            return
+        }
+        noteLeaving(i)
+        index.intValue = i
+        channel?.let { Tv.played(this, it) }
+        tune(delayMs = 0)
+    }
+
     private fun zap(step: Int) {
         if (lineup.size < 2) return
-        index.intValue = Math.floorMod(index.intValue + step, lineup.size)
+        val to = Math.floorMod(index.intValue + step, lineup.size)
+        noteLeaving(to)
+        index.intValue = to
         channel?.let { Tv.played(this, it) }
         tune(delayMs = TUNE_DELAY_MS)
     }
@@ -308,6 +335,7 @@ class PlayerActivity : ComponentActivity() {
 
     /** From the guide: tune that channel in the corner, guide stays open. */
     private fun preview(i: Int) {
+        noteLeaving(i)
         index.intValue = i
         channel?.let { Tv.played(this, it) }
         tune(delayMs = 0)
@@ -321,6 +349,7 @@ class PlayerActivity : ComponentActivity() {
             showBanner()
             return
         }
+        noteLeaving(i)
         index.intValue = i
         channel?.let { Tv.played(this, it) }
         tune(delayMs = 0)
@@ -423,7 +452,11 @@ class PlayerActivity : ComponentActivity() {
                 }
                 true
             }
-            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_INFO -> {
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_LAST_CHANNEL -> {
+                if (event.action == KeyEvent.ACTION_UP) flipBack()
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_INFO -> {
                 if (event.action == KeyEvent.ACTION_UP) showBanner()
                 true
             }
@@ -471,7 +504,7 @@ class PlayerActivity : ComponentActivity() {
 }
 
 @Composable
-private fun Banner(channel: Channel, nowNext: NowNext?, statusLine: String?, failed: Boolean) {
+private fun Banner(channel: Channel, nowNext: NowNext?, statusLine: String?, failed: Boolean, previous: Channel?) {
     val now = rememberNow()
     Box(
         Modifier
@@ -506,6 +539,9 @@ private fun Banner(channel: Channel, nowNext: NowNext?, statusLine: String?, fai
                     Text("Next ${clockText(next.start)} · ${next.title}", color = Palette.dim, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (statusLine != null) Text(statusLine, color = if (failed) Palette.warn else Palette.dim, fontSize = 15.sp)
+                previous?.let {
+                    Text("◀  back to ${if (it.number > 0) "${it.number} " else ""}${it.name}", color = Palette.dim, fontSize = 13.sp, maxLines = 1)
+                }
             }
         }
     }

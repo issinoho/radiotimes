@@ -78,6 +78,7 @@ Next:
 | | Settings (foot of the groups) | change the tvtimes link |
 | Player | ↑ / ↓, CH+ / CH− | next / previous channel in the group |
 | | OK | show or hide what's on |
+| | ◀ | back to the previous channel |
 | | ☰ | guide, with the channel still playing in the corner |
 | | Back | back to the list |
 | Plex | OK | open a list, or a movie/episode's details |

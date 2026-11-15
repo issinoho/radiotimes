@@ -20,6 +20,10 @@
   channels starred on your tvtimes account, and a "Watchlist" group with
   the upcoming airings flagged there ("Today 21:00 · Title"), soonest
   first. OK tunes the channel. Refreshed every 15 minutes.
+- **Previous channel**: ◀ (left) in the live player flips back to the
+  channel you were watching before (the remote's Last key too, where it
+  has one); the banner shows "◀ back to …". Channels raced past while
+  zapping don't count.
 
 ## 0.5.1
 
