@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **First-run setup wizard**: Welcome → tvtimes → Plex (optional) →
+  Ready. The phone setup page runs throughout, so links sent from a phone
+  show up as each step completes ("Connected ✓ 552 channels", "Found ✓
+  SmithPlex, docker-nuc"); typing with the remote is still offered.
+  Settings keeps the one-page setup screen for later changes.
+
 ## 0.3.0
 
 First release.

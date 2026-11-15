@@ -13,8 +13,8 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
 
 ## Status: Phase 1 — live TV
 
-- **Setup:** scan the QR code on the TV and paste your links on your
-  phone; or **Link Plex account** (enter the code at plex.tv/link: every
+- **Setup:** a first-run wizard (Welcome → tvtimes → Plex → Ready).
+  Scan the QR code on the TV and paste your links on your phone; or **Link Plex account** (enter the code at plex.tv/link: every
   server on the account is added, no tokens); or type them with the
   remote, or send them from a computer (below).
 - **Channel list:** groups down the left, channels with logo and what's on

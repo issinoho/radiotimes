@@ -135,14 +135,14 @@ fun SetupScreen(
 
 /** plex.tv/link: show Plex's 4-character code, wait for it to be entered, collect every server. */
 @Composable
-private fun PlexLink(focusFirst: Boolean, onLinked: (List<String>) -> Unit) {
+internal fun PlexLink(focusFirst: Boolean, showTitle: Boolean = true, onLinked: (List<String>) -> Unit) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (focusFirst) runCatching { first.requestFocus() } }
     var code by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    Text("Plex", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+    if (showTitle) Text("Plex", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     if (code == null) {
         OutlinedButton(onClick = { attempt++ }, modifier = Modifier.focusRequester(first).focusRing()) { Text("Link Plex account") }
     } else {
@@ -182,7 +182,7 @@ private fun PlexLink(focusFirst: Boolean, onLinked: (List<String>) -> Unit) {
 
 /** A QR code drawn from ZXing's bit matrix (no image files). */
 @Composable
-private fun QrCode(text: String, modifier: Modifier) {
+internal fun QrCode(text: String, modifier: Modifier) {
     val bitmap = remember(text) {
         val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 1))
         val bmp = android.graphics.Bitmap.createBitmap(matrix.width, matrix.height, android.graphics.Bitmap.Config.ARGB_8888)

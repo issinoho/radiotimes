@@ -27,7 +27,7 @@ import androidx.compose.ui.Modifier
  *     --es plex 'plex://host:32400?X-Plex-Token=… plex://other:32400?X-Plex-Token=…'
  */
 class MainActivity : ComponentActivity() {
-    private enum class Screen { Setup, Channels }
+    private enum class Screen { Wizard, Setup, Channels }
 
     private val screen = mutableStateOf(Screen.Channels)
     private var focusedChannel: Pair<Channel, List<Channel>>? = null
@@ -39,7 +39,9 @@ class MainActivity : ComponentActivity() {
         if (!acceptLinkFrom(intent)) {
             val saved = Prefs.tvtimesUrl(this)
             if (saved == null) {
-                screen.value = Screen.Setup
+                // A fresh install: the step-by-step wizard. (Settings later
+                // opens the one-page setup screen instead.)
+                screen.value = Screen.Wizard
             } else if (Tv.lineup.value == Tv.Lineup.Idle) {
                 Tv.connect(saved, cacheDir.absolutePath)
             }
@@ -49,6 +51,30 @@ class MainActivity : ComponentActivity() {
             RadiotimesTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = Palette.background) {
                     when (screen.value) {
+                        Screen.Wizard -> {
+                            // The phone page runs for the whole wizard; what it
+                            // receives is applied without leaving the wizard,
+                            // whose steps show it arriving.
+                            var phoneUrl by remember { mutableStateOf<String?>(null) }
+                            DisposableEffect(Unit) {
+                                val server = SetupServer { tvtimes, plex ->
+                                    if (plex.isNotEmpty()) setPlex(plex)
+                                    tvtimes?.let { useTvtimes(it) }
+                                }
+                                phoneUrl = server.start()
+                                onDispose { server.stop() }
+                            }
+                            val lineup by Tv.lineup.collectAsState()
+                            val plexServers by Plex.servers.collectAsState()
+                            SetupWizard(
+                                phoneUrl = phoneUrl,
+                                lineup = lineup,
+                                plexServers = plexServers,
+                                onTvtimes = { useTvtimes(it) },
+                                onPlexLinked = { setPlex(it) },
+                                onDone = { screen.value = Screen.Channels },
+                            )
+                        }
                         Screen.Setup -> {
                             val canCancel = Prefs.tvtimesUrl(this) != null
                             BackHandler(enabled = canCancel) { screen.value = Screen.Channels }
@@ -129,9 +155,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun connect(url: String) {
+        useTvtimes(url)
+        screen.value = Screen.Channels
+    }
+
+    private fun useTvtimes(url: String) {
         Prefs.setTvtimesUrl(this, url)
         Tv.connect(url, cacheDir.absolutePath)
-        screen.value = Screen.Channels
     }
 
     private fun play(channel: Channel, list: List<Channel>, openGuide: Boolean = false) {
