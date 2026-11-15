@@ -14,8 +14,8 @@ android {
         // Fire OS 7 is Android 9 (API 28); Fire OS 8 is Android 11.
         minSdk = 28
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.4.1"
 
         ndk {
             // Older Fire TV Sticks are 32-bit ARM, newer ones 64-bit; x86_64

@@ -3,8 +3,6 @@ package com.issinoho.radiotimes
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -46,7 +44,7 @@ class SetupServer(private val onSubmit: (tvtimes: String?, plex: List<String>) -
         thread(name = "setup-server", isDaemon = true) {
             while (!server.isClosed) {
                 val client = try { server.accept() } catch (e: SocketException) { break }
-                thread(isDaemon = true) { client.use { handle(it) } }
+                thread(isDaemon = true) { handle(client) }
             }
         }
         Log.i(TAG, "setup | phone setup page on port $PORT")
@@ -58,42 +56,94 @@ class SetupServer(private val onSubmit: (tvtimes: String?, plex: List<String>) -
         socket = null
     }
 
+    /**
+     * One connection. Must never throw: this runs on a bare thread, and an
+     * uncaught exception there kills the whole app. Phone browsers open
+     * spare connections that send nothing (they time out here), and Chrome
+     * may try https:// first (a TLS handshake arrives); both used to crash
+     * radiotimes, which the phone saw as ERR_TOO_MANY_RETRIES.
+     */
     private fun handle(client: Socket) {
-        client.soTimeout = 10_000
-        val input = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
-        val requestLine = input.readLine() ?: return
-        val (method, target) = requestLine.split(" ").let { (it.getOrNull(0) ?: "") to (it.getOrNull(1) ?: "/") }
-        var length = 0
-        while (true) {
-            val line = input.readLine() ?: break
-            if (line.isEmpty()) break
-            if (line.startsWith("Content-Length:", ignoreCase = true)) length = line.substringAfter(':').trim().toIntOrNull() ?: 0
+        try {
+            client.soTimeout = 5_000
+            val input = client.getInputStream()
+            val first = input.read()
+            if (first < 0) return
+            if (first == 0x16) { // TLS handshake: no https here; close so the browser falls back to http
+                Log.i(TAG, "setup | https attempt refused (browser will retry over http)")
+                return
+            }
+            val head = readHead(first, input) ?: return
+            val lines = head.split("\r\n")
+            val (method, target) = lines[0].split(" ").let { (it.getOrNull(0) ?: "") to (it.getOrNull(1) ?: "/") }
+            val length = lines.firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+                ?.substringAfter(':')?.trim()?.toIntOrNull() ?: 0
+            val body = if (length in 1..MAX_BODY) readBody(input, length) else ""
+            val result = respondTo(method, target, body, client)
+            Log.i(TAG, "setup | $method ${target.substringBefore('?')} -> $result")
+        } catch (e: Exception) {
+            Log.i(TAG, "setup | connection dropped: ${e.javaClass.simpleName}")
+        } finally {
+            // Close gracefully: finish sending, then drain anything unread, so
+            // the reply isn't cut off by a reset.
+            runCatching {
+                client.shutdownOutput()
+                client.soTimeout = 500
+                val sink = ByteArray(1024)
+                while (client.getInputStream().read(sink) > 0) Unit
+            }
+            runCatching { client.close() }
         }
-        val query = form(target.substringAfter('?', ""))
+    }
+
+    /** The request line and headers, up to the blank line; null if it's too long or not text. */
+    private fun readHead(first: Int, input: java.io.InputStream): String? {
+        val bytes = java.io.ByteArrayOutputStream()
+        bytes.write(first)
+        while (bytes.size() < MAX_HEAD) {
+            val b = input.read()
+            if (b < 0) return null
+            bytes.write(b)
+            val n = bytes.size()
+            if (n >= 4) {
+                val a = bytes.toByteArray()
+                if (a[n - 4] == '\r'.code.toByte() && a[n - 3] == '\n'.code.toByte() && a[n - 2] == '\r'.code.toByte() && a[n - 1] == '\n'.code.toByte()) {
+                    return String(a, 0, n - 4, Charsets.ISO_8859_1)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun readBody(input: java.io.InputStream, length: Int): String {
+        val buf = ByteArray(length)
+        var read = 0
+        while (read < length) {
+            val n = input.read(buf, read, length - read)
+            if (n < 0) break
+            read += n
+        }
+        return String(buf, 0, read, Charsets.UTF_8)
+    }
+
+    /** Writes the reply; returns a short description for the log (never the code or links). */
+    private fun respondTo(method: String, target: String, body: String, client: Socket): String {
         val out = client.getOutputStream()
-        fun respond(status: String, html: String) {
-            val body = html.toByteArray(Charsets.UTF_8)
+        fun respond(status: String, html: String): String {
+            val bytes = html.toByteArray(Charsets.UTF_8)
             out.write(
-                ("HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${body.size}\r\n" +
+                ("HTTP/1.1 $status\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${bytes.size}\r\n" +
                     "Cache-Control: no-store\r\nConnection: close\r\n\r\n").toByteArray(),
             )
-            out.write(body)
+            out.write(bytes)
             out.flush()
+            return status
         }
 
-        if (method == "GET" && target.startsWith("/?") && query["c"] == code) {
-            respond("200 OK", page(null))
-            return
-        }
-        if (method == "POST" && target.startsWith("/setup") && length in 1..MAX_BODY) {
-            val chars = CharArray(length)
-            var read = 0
-            while (read < length) {
-                val n = input.read(chars, read, length - read)
-                if (n < 0) break
-                read += n
-            }
-            val fields = form(String(chars, 0, read))
+        val query = form(target.substringAfter('?', ""))
+        if (method == "GET" && target.startsWith("/?") && query["c"] == code) return respond("200 OK", page(null))
+        if (method == "POST" && target.startsWith("/setup") && body.isNotEmpty()) {
+            val fields = form(body)
             if (fields["c"] != code) return respond("403 Forbidden", page("This page has expired. Scan the code on the TV again."))
             val tvtimes = fields["tvtimes"]?.trim()?.ifEmpty { null }
             val plex = Prefs.splitLinks(fields["plex"].orEmpty())
@@ -108,10 +158,10 @@ class SetupServer(private val onSubmit: (tvtimes: String?, plex: List<String>) -
             if (problem != null) return respond("200 OK", page(problem))
             Log.i(TAG, "setup | received from phone: tvtimes ${if (tvtimes != null) "yes" else "no"}, ${plex.size} Plex link(s)")
             main.post { onSubmit(tvtimes, plex) }
-            respond("200 OK", done())
-            return
+            return respond("200 OK", done())
         }
-        respond("404 Not Found", "<h1>Not found</h1>")
+        if (method == "GET" && target.startsWith("/?")) return respond("403 Forbidden", page("This page has expired. Scan the code on the TV again."))
+        return respond("404 Not Found", "<h1>Not found</h1>")
     }
 
     private fun looksLikeTvtimes(link: String) =
@@ -156,6 +206,7 @@ ${if (error != null) "<p class=\"err\">${escape(error)}</p>" else ""}
     companion object {
         const val PORT = 8765
         private const val MAX_BODY = 8_192
+        private const val MAX_HEAD = 16_384
         // No 0/O, 1/I: it's read off a TV screen.
         private const val ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         private val random = SecureRandom()

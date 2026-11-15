@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1
+
+- **Fix: phone setup page failed with ERR_TOO_MANY_RETRIES** and could
+  close radiotimes. A connection that sent nothing (phone browsers open
+  spare ones) timed out with an uncaught error that crashed the app, and
+  Chrome's attempt at https:// got a garbled reply. The setup server now
+  never lets a connection crash the app, refuses https at once so the
+  browser falls back to http, reads requests as bytes with size limits,
+  closes connections without cutting replies short, and logs each request
+  (`setup |` in logcat, without the code or links).
+
 ## 0.4.0
 
 - **First-run setup wizard**: Welcome → tvtimes → Plex (optional) →
