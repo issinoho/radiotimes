@@ -43,7 +43,8 @@ says so. The bridge tests do run locally.
 ## Platform notes
 
 - Fire OS 7 = API 28 (minSdk), Fire OS 8 = API 30. Older Sticks are 32-bit
-  `armeabi-v7a`, which is why Chaquopy is on Python 3.12, not 3.13.
+  `armeabi-v7a`, which is why Chaquopy is on Python 3.11: no Chaquopy
+  3.12+ target ships that ABI (checked on Maven Central).
 - Android has no tz database where CPython looks, so bridge.py avoids
   `zoneinfo`; Kotlin formats times in the device zone.
 - tvtimes `/stream/<id>` is a 302 to the upstream URL. ExoPlayer picks

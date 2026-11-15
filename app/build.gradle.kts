@@ -45,9 +45,12 @@ android {
 
 chaquopy {
     defaultConfig {
-        // 3.12, not 3.13: Chaquopy's 3.13 drops 32-bit ABIs, and older
-        // Sticks are armeabi-v7a. tvdinner needs 3.10+.
-        version = "3.12"
+        // 3.11 because it is the newest Chaquopy ships for armeabi-v7a, and
+        // older Sticks are 32-bit. Confirmed against Maven Central: the
+        // 3.11 targets have an armeabi-v7a zip, no 3.12 target does (CI
+        // failed on 3.12 with "not available for the ABI 'armeabi-v7a'").
+        // tvdinner needs 3.10+.
+        version = "3.11"
         pip {
             // tvdinner's engine modules need only requests. Its declared
             // dependencies (python-mpv, Pillow) serve cli/player/overlay,

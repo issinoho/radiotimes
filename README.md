@@ -62,6 +62,6 @@ git clone --recurse-submodules https://github.com/issinoho/radiotimes
 # bridge tests (no Android needed)
 pip install requests==2.32.3 pytest
 PYTHONPATH=app/src/main/python:vendor/tvdinner/src python -m pytest -q python-tests
-# APK (needs the Android SDK, JDK 17 and Python 3.12 on PATH)
+# APK (needs the Android SDK, JDK 17 and Python 3.11 on PATH)
 ./gradlew assembleDebug
 ```

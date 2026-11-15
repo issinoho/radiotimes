@@ -15,7 +15,7 @@ jobs:
           submodules: true
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - run: pip install requests==2.32.3 pytest
       - run: python -m pytest -q python-tests
         env:
@@ -36,7 +36,7 @@ jobs:
       # and byte-compile; it must match chaquopy.defaultConfig.version.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
