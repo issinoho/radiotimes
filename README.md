@@ -29,7 +29,8 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   start**. Plays the file directly with a seek bar; **Skip intro** /
   **Skip credits** (or **Next episode**) at Plex's markers; audio and
   subtitle tracks, including Plex's sidecar subtitle files, from the
-  player's ⚙ and CC menus; progress reported back to Plex; the next
+  player's ⚙ and CC menus; **subtitles found online** through the Plex
+  server's own search (☰ → Find subtitles online); progress reported back to Plex; the next
   episode starts when one ends.
 - **Guide:** ☰ opens a channels × time grid over the picture, which keeps
   playing in the corner; OK previews a channel, OK again shows the
@@ -83,7 +84,9 @@ Next:
 | | OK on Resume / Play | play |
 | | Back | up a level |
 | Plex player | OK | controls and what's playing (again: pause) — or press the Skip / Next episode button when it shows |
-| | ☰ / Info | full details of what's playing |
+| | ☰ / Info | full details of what's playing, picture size, find subtitles online |
+| | ⏯ ⏩ ⏪ | play/pause, forward 30 s, back 10 s |
+| Live TV and Plex | hold OK | picture size: Fit → Zoom → Stretch |
 | | ↑ ↓ ← → | show the seek bar and controls |
 | | ⏪ ⏩ | back 10 s / forward 30 s |
 | | Back | hide controls, then leave (progress is saved to Plex) |

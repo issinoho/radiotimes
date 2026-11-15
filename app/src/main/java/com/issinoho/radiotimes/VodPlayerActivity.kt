@@ -21,7 +21,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,6 +88,10 @@ class VodPlayerActivity : ComponentActivity() {
     private enum class Info { None, Banner, Full }
     private val info = mutableStateOf(Info.None)
     private val positionMs = mutableStateOf(0L)
+    private val picture = mutableStateOf(PictureMode.Fit)
+    private var okHeld = false
+    /** The ☰ panel's subtitle search: null = showing the panel's buttons. */
+    private val subtitleSearch = mutableStateOf<SubtitleSearch?>(null)
     private val durationMs = mutableStateOf(0L)
     /** "Skip intro" / "Skip credits" / "Next episode", while inside a Plex marker. */
     private val skip = mutableStateOf<String?>(null)
@@ -94,6 +104,7 @@ class VodPlayerActivity : ComponentActivity() {
         val itemJson = intent.getStringExtra(EXTRA_ITEM) ?: return finish()
         item = parse(itemJson)
         detail.value = PlexDetail(itemJson)
+        picture.value = PictureMode.load(this)
         if (intent.getBooleanExtra(EXTRA_FROM_START, false)) item = item.copy(resumeSeconds = null)
 
         setContent {
@@ -105,6 +116,7 @@ class VodPlayerActivity : ComponentActivity() {
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                                 setShowSubtitleButton(true)
                                 controllerShowTimeoutMs = 5_000
+                                resizeMode = picture.value.resizeMode
                                 // The banner goes with the controller it was shown with.
                                 setControllerVisibilityListener(
                                     PlayerView.ControllerVisibilityListener { visibility ->
@@ -122,7 +134,14 @@ class VodPlayerActivity : ComponentActivity() {
                         PlexNowPlaying(d, positionMs.value, durationMs.value, Modifier.align(Alignment.TopCenter))
                     }
                     if (d != null && info.value == Info.Full) {
-                        PlexNowPlayingFull(d, positionMs.value, durationMs.value, Modifier.align(Alignment.CenterStart))
+                        PlexNowPlayingFull(
+                            d, positionMs.value, durationMs.value, Modifier.align(Alignment.CenterStart),
+                            picture = picture.value,
+                            onPicture = ::cyclePicture,
+                            search = subtitleSearch.value,
+                            onFindSubtitles = ::findSubtitles,
+                            onPickSubtitle = ::attachSubtitle,
+                        )
                     }
                     skip.value?.let {
                         Text(
@@ -273,21 +292,84 @@ class VodPlayerActivity : ComponentActivity() {
         firstFrameLogged = false
         val exo = player ?: return
         val resumeMs = next.resumeSeconds?.takeIf { it > 30 }?.let { (it * 1000).toLong() } ?: C.TIME_UNSET
-        // Plex's sidecar subtitle files (not inside the media file) join the
-        // file's own tracks in the controller's CC menu.
-        val subtitles = next.sidecars.map { sc ->
-            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(sc.url))
-                .setMimeType(sc.mime)
-                .setLanguage(sc.language)
-                .setLabel(sc.label)
-                .build()
-        }
-        val media = MediaItem.Builder().setUri(next.url).setSubtitleConfigurations(subtitles).build()
-        exo.setMediaItem(media, resumeMs.takeIf { it != C.TIME_UNSET } ?: 0L)
+        exo.setMediaItem(mediaItem(next, selected = null), resumeMs.takeIf { it != C.TIME_UNSET } ?: 0L)
         exo.playWhenReady = true
         exo.prepare()
         val title = listOfNotNull(next.seriesTitle, next.title).joinToString(" · ")
         showNotice(if (resumeMs != C.TIME_UNSET) "$title — resuming at ${hms(resumeMs)}" else title)
+    }
+
+    /**
+     * The file plus Plex's sidecar subtitle files (not inside the media file;
+     * they join the file's own tracks in the controller's CC menu). `selected`
+     * is marked default, so ExoPlayer switches it on.
+     */
+    private fun mediaItem(it: Item, selected: String?): MediaItem {
+        val subtitles = it.sidecars.map { sc ->
+            MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(sc.url))
+                .setMimeType(sc.mime)
+                .setLanguage(sc.language)
+                .setLabel(sc.label)
+                .setSelectionFlags(if (sc.url == selected) C.SELECTION_FLAG_DEFAULT else 0)
+                .build()
+        }
+        return MediaItem.Builder().setUri(it.url).setSubtitleConfigurations(subtitles).build()
+    }
+
+    private fun cyclePicture() {
+        val mode = picture.value.next()
+        picture.value = mode
+        PictureMode.save(this, mode)
+        view?.resizeMode = mode.resizeMode
+        showNotice("Picture: ${mode.label}")
+    }
+
+    /** Plex's own online subtitle search, in the device's language. */
+    private fun findSubtitles() {
+        val language = java.util.Locale.getDefault().language.ifEmpty { "en" }
+        subtitleSearch.value = SubtitleSearch.Searching
+        lifecycleScope.launch {
+            val json = Engine.callPlex("plex_subtitle_search", server, item.ratingKey, language)
+            val error = bridgeError(json)
+            subtitleSearch.value = if (error != null) {
+                SubtitleSearch.Failed(redactTokens(error))
+            } else {
+                val arr = org.json.JSONArray(json)
+                val found = (0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    SubtitleResult(o.getString("key"), o.optString("title"), o.optString("provider"), o.optString("codec", "srt"), o.optString("language", language))
+                }
+                if (found.isEmpty()) SubtitleSearch.Failed("No subtitles found online for this.") else SubtitleSearch.Results(found)
+            }
+        }
+    }
+
+    /** Plex downloads the pick and attaches it to the item; play on with it switched on. */
+    private fun attachSubtitle(pick: SubtitleResult) {
+        subtitleSearch.value = SubtitleSearch.Attaching(pick.title)
+        val before = item.sidecars.map { it.url }.toSet()
+        lifecycleScope.launch {
+            val json = Engine.callPlex("plex_subtitle_attach", server, item.ratingKey, pick.key, pick.codec, pick.language)
+            bridgeError(json)?.let { subtitleSearch.value = SubtitleSearch.Failed(redactTokens(it)); return@launch }
+            val arr = org.json.JSONArray(json)
+            val sidecars = (0 until arr.length()).mapNotNull { i ->
+                arr.optJSONObject(i)?.let { Sidecar(it.getString("url"), it.getString("mime"), it.optString("language").ifEmpty { null }, it.optString("label").ifEmpty { null }) }
+            }
+            val added = sidecars.firstOrNull { it.url !in before } ?: sidecars.lastOrNull()
+            if (added == null) {
+                subtitleSearch.value = SubtitleSearch.Failed("Plex didn't attach a subtitle file.")
+                return@launch
+            }
+            item = item.copy(sidecars = sidecars)
+            val exo = player ?: return@launch
+            val position = exo.currentPosition
+            exo.setMediaItem(mediaItem(item, selected = added.url), position)
+            exo.prepare()
+            Log.i(TAG, "vod | subtitles attached from Plex's online search (${added.language ?: "?"})")
+            subtitleSearch.value = null
+            info.value = Info.None
+            showNotice("Subtitles on: ${added.label ?: added.language ?: "online"}")
+        }
     }
 
     /** Reported on the main thread's state; the network call happens on the Plex thread. */
@@ -355,14 +437,24 @@ class VodPlayerActivity : ComponentActivity() {
         }
         // ☰ / Info: the full details panel, on and off.
         if (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_INFO) {
-            if (event.action == KeyEvent.ACTION_UP) info.value = if (info.value == Info.Full) Info.None else Info.Full
+            if (event.action == KeyEvent.ACTION_UP) {
+                val open = info.value != Info.Full
+                info.value = if (open) Info.Full else Info.None
+                subtitleSearch.value = null
+                if (open) v?.hideController()
+            }
             return true
         }
-        // Back closes the details panel first, then the controller, then leaves.
+        // Back steps out of the subtitle search, then closes the panel, then
+        // the controller, then leaves.
         if (event.keyCode == KeyEvent.KEYCODE_BACK && info.value == Info.Full) {
-            if (event.action == KeyEvent.ACTION_UP) info.value = Info.None
+            if (event.action == KeyEvent.ACTION_UP) {
+                if (subtitleSearch.value != null) subtitleSearch.value = null else info.value = Info.None
+            }
             return true
         }
+        // The panel's buttons and results take the D-pad and OK.
+        if (info.value == Info.Full) return super.dispatchKeyEvent(event)
         // A showing skip button takes OK (when the controller is hidden).
         if (skip.value != null && v != null && !v.isControllerFullyVisible && ok) {
             if (event.action == KeyEvent.ACTION_UP) doSkip()
@@ -375,10 +467,18 @@ class VodPlayerActivity : ComponentActivity() {
         // OK while watching: controller plus the info banner, like live TV's
         // banner. The controller's play/pause button has focus, so a second
         // OK pauses; the remote's play/pause key works throughout.
+        // Hold OK (controller hidden): next picture size.
         if (v != null && !v.isControllerFullyVisible && ok) {
-            if (event.action == KeyEvent.ACTION_UP) {
-                info.value = if (info.value == Info.Full) Info.Full else Info.Banner
-                v.showController()
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 1) {
+                okHeld = true
+                cyclePicture()
+            } else if (event.action == KeyEvent.ACTION_UP) {
+                if (okHeld) {
+                    okHeld = false
+                } else {
+                    info.value = Info.Banner
+                    v.showController()
+                }
             }
             return true
         }
@@ -404,6 +504,15 @@ private fun hms(ms: Long): String {
 }
 
 private fun clockMs(ms: Long): String = hms(ms)
+
+data class SubtitleResult(val key: String, val title: String, val provider: String, val codec: String, val language: String)
+
+sealed interface SubtitleSearch {
+    data object Searching : SubtitleSearch
+    data class Results(val found: List<SubtitleResult>) : SubtitleSearch
+    data class Attaching(val title: String) : SubtitleSearch
+    data class Failed(val message: String) : SubtitleSearch
+}
 
 /** The top banner shown with the controller: what this is and where you are in it. */
 @androidx.compose.runtime.Composable
@@ -457,15 +566,25 @@ private fun PlexNowPlaying(d: PlexDetail, positionMs: Long, durationMs: Long, mo
 
 /** ☰: everything about what's playing, over the left of the picture. */
 @androidx.compose.runtime.Composable
-private fun PlexNowPlayingFull(d: PlexDetail, positionMs: Long, durationMs: Long, modifier: Modifier) {
+private fun PlexNowPlayingFull(
+    d: PlexDetail,
+    positionMs: Long,
+    durationMs: Long,
+    modifier: Modifier,
+    picture: PictureMode,
+    onPicture: () -> Unit,
+    search: SubtitleSearch?,
+    onFindSubtitles: () -> Unit,
+    onPickSubtitle: (SubtitleResult) -> Unit,
+) {
     val now = rememberNow()
     Column(
         modifier
             .width(560.dp)
             .fillMaxHeight()
             .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xF20B0A1F), Color(0xCC0B0A1F), Color.Transparent)))
-            .padding(start = 48.dp, end = 40.dp, top = 40.dp, bottom = 40.dp),
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+            .padding(start = 48.dp, end = 40.dp, top = 28.dp, bottom = 24.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
     ) {
         val heading = listOfNotNull(
             d.seriesTitle,
@@ -479,17 +598,77 @@ private fun PlexNowPlayingFull(d: PlexDetail, positionMs: Long, durationMs: Long
         )
         if (d.genres.isNotEmpty()) Text(d.genres.joinToString(" · "), color = Palette.accent, fontSize = 15.sp)
         d.tagline?.let { Text(it, color = Palette.dim, fontSize = 15.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) }
-        d.description?.let { Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 9, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+        // Bounded so the panel's buttons stay on screen (1080p is 540dp tall).
+        d.description?.let { Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, maxLines = if (search == null) 5 else 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
         d.director?.let { Text("Director  $it", color = Palette.dim, fontSize = 14.sp) }
-        if (d.cast.isNotEmpty()) Text("Cast  ${d.cast.joinToString(", ")}", color = Palette.dim, fontSize = 14.sp, maxLines = 2)
+        if (d.cast.isNotEmpty()) Text("Cast  ${d.cast.joinToString(", ")}", color = Palette.dim, fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         d.studio?.let { Text("Studio  $it", color = Palette.dim, fontSize = 14.sp) }
         listOfNotNull(d.video, d.audio).takeIf { it.isNotEmpty() }?.let { Text("File  ${it.joinToString("  ·  ")}", color = Palette.dim, fontSize = 14.sp) }
-        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         if (durationMs > 0) {
             val left = (durationMs - positionMs).coerceAtLeast(0)
             ProgressBar((positionMs.toFloat() / durationMs).coerceIn(0f, 1f), Modifier.width(420.dp))
             Text("${left / 60_000} min left  ·  ends at ${clockText(now + left)}", color = Palette.dim, fontSize = 14.sp)
         }
-        Text("☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
+        androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
+        PanelOptions(picture, onPicture, search, onFindSubtitles, onPickSubtitle)
+        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        Text(if (search != null) "Back: return" else "☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
+    }
+}
+
+/** The ☰ panel's buttons, or the online subtitle search in their place. */
+@androidx.compose.runtime.Composable
+private fun PanelOptions(
+    picture: PictureMode,
+    onPicture: () -> Unit,
+    search: SubtitleSearch?,
+    onFindSubtitles: () -> Unit,
+    onPickSubtitle: (SubtitleResult) -> Unit,
+) {
+    val first = androidx.compose.runtime.remember(search == null) { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(search == null, search is SubtitleSearch.Results) {
+        repeat(20) {
+            if (runCatching { first.requestFocus() }.isSuccess) return@LaunchedEffect
+            delay(30)
+        }
+    }
+    when (search) {
+        null -> androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
+            androidx.compose.material3.OutlinedButton(
+                onClick = onPicture,
+                modifier = Modifier.focusRequester(first).focusRing(),
+            ) { Text("Picture: ${picture.label}") }
+            androidx.compose.material3.OutlinedButton(onClick = onFindSubtitles, modifier = Modifier.focusRing()) {
+                Text("Find subtitles online")
+            }
+        }
+        SubtitleSearch.Searching -> Text("Searching Plex's online subtitles…", color = Palette.text, fontSize = 15.sp)
+        is SubtitleSearch.Attaching -> Text("Downloading “${search.title}”…", color = Palette.text, fontSize = 15.sp, maxLines = 1)
+        is SubtitleSearch.Failed -> Text(search.message, color = Palette.warn, fontSize = 15.sp)
+        is SubtitleSearch.Results -> {
+            Text("Choose subtitles (from ${search.found.first().provider.ifEmpty { "Plex" }})", color = Palette.dim, fontSize = 14.sp)
+            androidx.compose.foundation.lazy.LazyColumn(
+                Modifier.height(150.dp),
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+            ) {
+                items(search.found.size) { i ->
+                    val r = search.found[i]
+                    var focused by androidx.compose.runtime.remember { mutableStateOf(false) }
+                    Text(
+                        r.title,
+                        color = Palette.text, fontSize = 14.sp, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(if (i == 0) Modifier.focusRequester(first) else Modifier)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (focused) Palette.focus else Color.Transparent)
+                            .onFocusChanged { focused = it.isFocused }
+                            .clickable { onPickSubtitle(r) }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                    )
+                }
+            }
+        }
     }
 }

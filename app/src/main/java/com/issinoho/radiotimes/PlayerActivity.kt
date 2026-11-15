@@ -122,7 +122,7 @@ class PlayerActivity : ComponentActivity() {
                             PlayerView(ctx).apply {
                                 useController = false
                                 isFocusable = false
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                resizeMode = PictureMode.load(this@PlayerActivity).resizeMode
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                                 player = this@PlayerActivity.player
                                 view = this
@@ -325,8 +325,18 @@ class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { if (down(event)) zap(+1); true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { if (down(event)) zap(-1); true }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                if (event.action == KeyEvent.ACTION_UP) {
-                    if (bannerVisible.value && status.value == Status.Playing) bannerVisible.value = false else showBanner()
+                // Hold OK: next picture size. A tap: the banner.
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 1) {
+                    okHeld = true
+                    cyclePicture()
+                } else if (event.action == KeyEvent.ACTION_UP) {
+                    if (okHeld) {
+                        okHeld = false
+                    } else if (bannerVisible.value && status.value == Status.Playing) {
+                        bannerVisible.value = false
+                    } else {
+                        showBanner()
+                    }
                 }
                 true
             }
@@ -337,6 +347,15 @@ class PlayerActivity : ComponentActivity() {
             else -> false
         }
         return handled || super.dispatchKeyEvent(event)
+    }
+
+    private var okHeld = false
+
+    private fun cyclePicture() {
+        val mode = PictureMode.load(this).next()
+        PictureMode.save(this, mode)
+        view?.resizeMode = mode.resizeMode
+        android.widget.Toast.makeText(this, "Picture: ${mode.label}", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     /** Key down, including auto-repeat, so holding up/down keeps stepping. */

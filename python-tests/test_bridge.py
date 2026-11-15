@@ -512,3 +512,68 @@ def test_plex_library_recent_views(plex, monkeypatch) -> None:
     assert seen[-1]["type"] == "4"  # episodes, for a TV library
     assert [n["title"] for n in json.loads(bridge.plex_library_view(0, json.dumps(films), "all"))] == ["Casino Royale"]
     assert "error" in json.loads(bridge.plex_library_view(0, json.dumps(films), "sideways"))
+
+
+
+def test_plex_subtitle_search_and_attach(plex, monkeypatch) -> None:
+    results = {"MediaContainer": {"Stream": [
+        {"key": "/library/streams/900", "codec": "srt", "languageCode": "eng", "title": "Casino.Royale.2006.en",
+         "providerTitle": "OpenSubtitles"},
+        {"displayTitle": "no key, skipped"},
+    ]}}
+    real_get = requests.get
+    puts: list[tuple[str, dict]] = []
+
+    def get(url: str, *args: object, **kwargs: object):
+        if url.endswith("/library/metadata/10/subtitles"):
+            assert kwargs["params"]["language"] == "en"
+            return _FakeResponse(results)
+        return real_get(url, *args, **kwargs)
+
+    def put(url: str, *args: object, **kwargs: object):
+        puts.append((url, dict(kwargs.get("params") or {})))
+        return _FakeResponse({})
+
+    # The new file appears on the item only on the second look after the
+    # PUT, as on a real server (Plex downloads it in the background).
+    looks_after_put = {"n": 0}
+    real_route = PLEX_ROUTES["/library/metadata/10"]
+
+    def metadata_with_new_sub() -> dict:
+        item = json.loads(json.dumps(real_route))
+        streams = item["MediaContainer"]["Metadata"][0]["Media"][0]["Part"][0]["Stream"]
+        streams.append({"streamType": 3, "codec": "srt", "key": "/library/streams/901", "languageTag": "en",
+                        "displayTitle": "English (SRT OpenSubtitles)"})
+        return item
+
+    def get_with_delay(url: str, *args: object, **kwargs: object):
+        if url.endswith("/library/metadata/10") and puts:
+            looks_after_put["n"] += 1
+            if looks_after_put["n"] >= 2:
+                return _FakeResponse(metadata_with_new_sub())
+        return get(url, *args, **kwargs)
+
+    monkeypatch.setattr(bridge, "_SUBTITLE_WAIT_S", 0)
+    monkeypatch.setattr(requests, "get", get_with_delay)
+    monkeypatch.setattr(requests, "put", put)
+    found = json.loads(bridge.plex_subtitle_search(0, "10", "en"))
+    assert found == [{"key": "/library/streams/900", "title": "Casino.Royale.2006.en", "provider": "OpenSubtitles",
+                      "language": "eng", "codec": "srt", "hearing_impaired": False}]
+    sidecars = json.loads(bridge.plex_subtitle_attach(0, "10", "/library/streams/900", "srt", "eng"))
+    assert puts == [(f"{PLEX}/library/metadata/10/subtitles",
+                     {"key": "/library/streams/900", "codec": "srt", "language": "eng", "hearingImpaired": "0", "forced": "0"})]
+    # Waited for the new file; the item's sidecars now include it.
+    assert looks_after_put["n"] >= 2
+    assert [s["url"] for s in sidecars] == [
+        f"{PLEX}/library/streams/7?X-Plex-Token={PLEX_TOKEN}",
+        f"{PLEX}/library/streams/901?X-Plex-Token={PLEX_TOKEN}",
+    ]
+
+
+def test_plex_subtitle_search_failure_is_an_error(plex, monkeypatch) -> None:
+    def down(*args: object, **kwargs: object) -> None:
+        raise requests.ConnectionError(f"refused X-Plex-Token={PLEX_TOKEN}")
+
+    monkeypatch.setattr(requests, "get", down)
+    out = bridge.plex_subtitle_search(0, "10", "en")
+    assert "error" in json.loads(out) and PLEX_TOKEN not in out

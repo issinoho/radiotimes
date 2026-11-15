@@ -608,6 +608,68 @@ def _video_label(media: dict) -> str | None:
     return " ".join(x for x in (res, codec) if x) or None
 
 
+@_guarded
+def plex_subtitle_search(server: int, rating_key: str, language: str) -> str:
+    """Online subtitles for an item, from the Plex server's own subtitle
+    search (its built-in OpenSubtitles provider -- what Plex's apps call
+    "Search for subtitles"): `[{"key", "title", "provider", "language",
+    "codec", "hearing_impaired"}]`, in Plex's order. No API key: the server
+    does the searching. Not in tvdinner; one GET."""
+    creds = _plex_server(server)
+    r = requests.get(
+        f"{creds.base_url}/library/metadata/{rating_key}/subtitles",
+        params={"language": language, "hearingImpaired": "0", "forced": "0"},
+        headers={"Accept": "application/json", "X-Plex-Token": creds.token},
+        timeout=30,
+    )
+    r.raise_for_status()
+    streams = (r.json().get("MediaContainer") or {}).get("Stream") or []
+    return _ok(
+        [
+            {
+                "key": s["key"],
+                "title": s.get("title") or s.get("displayTitle") or "Subtitles",
+                "provider": s.get("providerTitle"),
+                "language": s.get("languageCode") or language,
+                "codec": s.get("codec") or "srt",
+                "hearing_impaired": bool(s.get("hearingImpaired")),
+            }
+            for s in streams
+            if isinstance(s, dict) and s.get("key")
+        ]
+    )
+
+
+@_guarded
+def plex_subtitle_attach(server: int, rating_key: str, key: str, codec: str, language: str) -> str:
+    """Have the Plex server download a search result and attach it to the
+    item (as Plex's apps do; it stays there for every client). Returns the
+    item's sidecar subtitles afterwards -- the new one among them -- in the
+    same shape as plex_resolve's `sidecar_subtitles`."""
+    creds = _plex_server(server)
+    before = {s["url"] for s in _plex_extras(creds, rating_key).get("sidecar_subtitles", [])}
+    r = requests.put(
+        f"{creds.base_url}/library/metadata/{rating_key}/subtitles",
+        params={"key": key, "codec": codec, "language": language, "hearingImpaired": "0", "forced": "0"},
+        headers={"Accept": "application/json", "X-Plex-Token": creds.token},
+        timeout=60,
+    )
+    r.raise_for_status()
+    # Plex downloads it in the background after answering: a few seconds
+    # on a real server. Wait for the new file to show up on the item.
+    sidecars: list[dict[str, Any]] = []
+    for _ in range(_SUBTITLE_WAIT_TRIES):
+        sidecars = _plex_extras(creds, rating_key).get("sidecar_subtitles", [])
+        if any(s["url"] not in before for s in sidecars):
+            break
+        time.sleep(_SUBTITLE_WAIT_S)
+    return _ok(sidecars)
+
+
+_SUBTITLE_WAIT_TRIES = 15
+_SUBTITLE_WAIT_S = 1.0
+
+
 _SUBTITLE_MIME = {"srt": "application/x-subrip", "ass": "text/x-ssa", "ssa": "text/x-ssa", "vtt": "text/vtt"}
 
 

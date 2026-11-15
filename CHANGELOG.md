@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0
+
+- **Picture size**: Fit, Zoom (fills the screen, crops the edges -- for
+  4:3 channels or letterboxed films) or Stretch. Hold OK to cycle, in live
+  TV and Plex; remembered between sessions. Also a button in Plex's ☰
+  panel.
+- **Online subtitles for Plex**: ☰ → Find subtitles online lists results
+  from your Plex server's own subtitle search (OpenSubtitles; no account
+  or API key needed). Pick one and Plex downloads and attaches it to the
+  item (so your other Plex apps have it too) and it switches on where you
+  are.
+- **Dark channel logos** (TCM's black-on-transparent one) are now shown
+  inverted or on a light plate instead of disappearing.
+- **Play/pause, ⏩ and ⏪ work in the Plex player straight away**, without
+  pressing OK first.
+
 ## 0.4.2
 
 - **Plex player: programme information.** OK while watching shows the
