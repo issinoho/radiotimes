@@ -18,6 +18,11 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   now, details of the focused channel on the right. The guide shows at once
   from cache and refreshes in the background when it's over 6 hours old.
 - **Player:** fullscreen live TV with a now/next banner.
+- **Plex:** each Plex server is an entry in the group rail. Browse On
+  Deck and libraries as poster grids, shows → seasons → episodes; plays
+  the file directly with a seek bar, resumes where Plex says you left
+  off, reports progress back to Plex (resume points, watched), and starts
+  the next episode when one ends.
 - **Guide:** ☰ opens a channels × time grid over the picture, which keeps
   playing in the corner; OK previews a channel, OK again shows the
   programme's full details.
@@ -26,9 +31,8 @@ Phase 0 measured the engine on a Fire TV Stick (Fire OS 8, 32-bit ARM):
 channel list 0.4 s, guide from cache 0.4 s, fresh guide ~15 s for an 11.6 MB
 XMLTV feed, first frame 2.1 s.
 
-Roadmap: 0 probe ✓ → 1 live TV ✓ → 2 guide grid ✓ → **Plex** (via
-tvdinner's Plex client) → tvtimes sync (favourites, watchlist, watch
-reporting) → polish.
+Roadmap: 0 probe ✓ → 1 live TV ✓ → 2 guide grid ✓ → 3 Plex ✓ (first
+cut) → tvtimes sync (favourites, watchlist, watch reporting) → polish.
 
 ### Remote
 
@@ -42,6 +46,12 @@ reporting) → polish.
 | | OK | show or hide what's on |
 | | ☰ | guide, with the channel still playing in the corner |
 | | Back | back to the list |
+| Plex | OK | open / play |
+| | Back | up a level |
+| Plex player | OK | pause / play |
+| | ↑ ↓ ← → | show the seek bar and controls |
+| | ⏪ ⏩ | back 10 s / forward 30 s |
+| | Back | hide controls, then leave (progress is saved to Plex) |
 | Guide | ↑ ↓ ← → | move through channels and time (2 h at a time, 24 h ahead) |
 | | OK | preview that channel in the corner |
 | | OK again | full programme details |
@@ -70,8 +80,12 @@ reporting) → polish.
 
    ```sh
    adb shell am start -n com.issinoho.radiotimes/.MainActivity \
-     --es url 'tvtimess://your-host?token=YOUR_TOKEN'
+     --es url 'tvtimess://your-host?token=YOUR_TOKEN' \
+     --es plex 'plex://host:32400?X-Plex-Token=TOKEN plex://other:32400?X-Plex-Token=TOKEN'
    ```
+
+   (`--es plex` is optional; give one or more Plex links separated by
+   spaces. The token is the one Plex Web shows under *Get Info → View XML*.)
 
    For a bug report, `adb logcat -s radiotimes python.stderr` shows the
    guide timings (`guide |`) and stream start-up (`play |`).

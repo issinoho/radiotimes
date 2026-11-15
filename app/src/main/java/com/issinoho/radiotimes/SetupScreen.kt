@@ -38,8 +38,15 @@ import androidx.compose.ui.unit.sp
  * TV's full-screen keyboard, which Back doesn't always dismiss.
  */
 @Composable
-fun SetupScreen(initial: String, canCancel: Boolean, onConnect: (String) -> Unit, onCancel: () -> Unit) {
+fun SetupScreen(
+    initial: String,
+    initialPlex: String,
+    canCancel: Boolean,
+    onConnect: (url: String, plex: String) -> Unit,
+    onCancel: () -> Unit,
+) {
     var url by remember { mutableStateOf(initial) }
+    var plex by remember { mutableStateOf(initialPlex) }
     val valid = url.trim().let { it.startsWith("tvtimes://") || it.startsWith("tvtimess://") } && "token=" in url
     val field = remember { FocusRequester() }
     val connect = remember { FocusRequester() }
@@ -61,12 +68,21 @@ fun SetupScreen(initial: String, canCancel: Boolean, onConnect: (String) -> Unit
             label = { Text("tvtimes link") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { if (valid) onConnect(url.trim()) }),
+            keyboardActions = KeyboardActions(onDone = { if (valid) onConnect(url.trim(), plex) }),
             visualTransformation = MaskToken,
             modifier = Modifier.width(820.dp).focusRequester(field),
         )
+        OutlinedTextField(
+            value = plex,
+            onValueChange = { plex = it },
+            label = { Text("Plex servers (optional): plex://host:32400?X-Plex-Token=…, separated by spaces") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+            visualTransformation = MaskToken,
+            modifier = Modifier.width(820.dp),
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(onClick = { onConnect(url.trim()) }, enabled = valid, modifier = Modifier.focusRequester(connect).focusRing()) {
+            Button(onClick = { onConnect(url.trim(), plex) }, enabled = valid, modifier = Modifier.focusRequester(connect).focusRing()) {
                 Text("Connect")
             }
             if (canCancel) OutlinedButton(onClick = onCancel, modifier = Modifier.focusRing()) { Text("Cancel") }
@@ -77,7 +93,8 @@ fun SetupScreen(initial: String, canCancel: Boolean, onConnect: (String) -> Unit
             fontSize = 14.sp,
         )
         Text(
-            "adb shell am start -n com.issinoho.radiotimes/.MainActivity --es url 'tvtimess://host?token=…'",
+            "adb shell am start -n com.issinoho.radiotimes/.MainActivity --es url 'tvtimess://host?token=…' " +
+                "--es plex 'plex://host:32400?X-Plex-Token=…'",
             color = Palette.dim,
             fontSize = 13.sp,
             fontFamily = FontFamily.Monospace,
@@ -92,7 +109,7 @@ fun SetupScreen(initial: String, canCancel: Boolean, onConnect: (String) -> Unit
 /** The token is never shown (CLAUDE.md), only its length; editing still works. */
 private object MaskToken : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
-        val masked = Regex("""(token=)([^&]*)""").replace(text.text) { m ->
+        val masked = Regex("""(?i)(token=)([^&,\s]*)""").replace(text.text) { m ->
             m.groupValues[1] + "•".repeat(m.groupValues[2].length)
         }
         // Same length as the input, so offsets map one to one.

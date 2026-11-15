@@ -17,10 +17,11 @@ import androidx.compose.ui.Modifier
  * Setup (once) and the channel list. ☰ opens the guide (over the focused
  * channel, playing); Settings at the foot of the group rail reopens setup.
  *
- * The link can also be sent from a computer, which saves typing a token
+ * The links can also be sent from a computer, which saves typing tokens
  * with the remote; this works whether or not the app is already open:
  *   adb shell am start -n com.issinoho.radiotimes/.MainActivity \
- *     --es url 'tvtimess://host?token=…'
+ *     --es url 'tvtimess://host?token=…' \
+ *     --es plex 'plex://host:32400?X-Plex-Token=… plex://other:32400?X-Plex-Token=…'
  */
 class MainActivity : ComponentActivity() {
     private enum class Screen { Setup, Channels }
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Tv.init(this)
+        Plex.configure(Prefs.plexLinks(this), filesDir.absolutePath)
         if (!acceptLinkFrom(intent)) {
             val saved = Prefs.tvtimesUrl(this)
             if (saved == null) {
@@ -49,8 +51,12 @@ class MainActivity : ComponentActivity() {
                             BackHandler(enabled = canCancel) { screen.value = Screen.Channels }
                             SetupScreen(
                                 initial = Prefs.tvtimesUrl(this).orEmpty(),
+                                initialPlex = Prefs.plexLinks(this).joinToString(" "),
                                 canCancel = canCancel,
-                                onConnect = { connect(it) },
+                                onConnect = { url, plex ->
+                                    setPlex(Prefs.splitLinks(plex))
+                                    connect(url)
+                                },
                                 onCancel = { screen.value = Screen.Channels },
                             )
                         }
@@ -59,6 +65,7 @@ class MainActivity : ComponentActivity() {
                             val guide by Tv.guide.collectAsState()
                             val nowNext by Tv.nowNext.collectAsState()
                             val lastPlayed by Tv.lastPlayed.collectAsState()
+                            val plexServers by Plex.servers.collectAsState()
                             ChannelsScreen(
                                 lineup = lineup,
                                 guide = guide,
@@ -66,6 +73,8 @@ class MainActivity : ComponentActivity() {
                                 lastPlayed = lastPlayed,
                                 onPlay = { channel, list -> play(channel, list) },
                                 onFocusChannel = { channel, list -> focusedChannel = channel to list },
+                                plexServers = plexServers,
+                                onPlex = { startActivity(PlexActivity.intent(this, it)) },
                                 onRetry = { Prefs.tvtimesUrl(this)?.let { connect(it) } },
                                 onChangeLink = { screen.value = Screen.Setup },
                             )
@@ -82,12 +91,21 @@ class MainActivity : ComponentActivity() {
         acceptLinkFrom(intent)
     }
 
-    /** Takes a `--es url` link sent over adb. Returns whether there was one. */
+    /** Takes `--es url` / `--es plex` links sent over adb. Returns whether there was a tvtimes link. */
     private fun acceptLinkFrom(intent: Intent?): Boolean {
+        intent?.getStringExtra(EXTRA_PLEX)?.let {
+            intent.removeExtra(EXTRA_PLEX)
+            setPlex(Prefs.splitLinks(it))
+        }
         val url = intent?.getStringExtra(EXTRA_URL)?.trim()?.ifEmpty { null } ?: return false
         intent.removeExtra(EXTRA_URL)
         connect(url)
         return true
+    }
+
+    private fun setPlex(links: List<String>) {
+        Prefs.setPlexLinks(this, links)
+        Plex.configure(links, filesDir.absolutePath)
     }
 
     private fun connect(url: String) {
@@ -113,5 +131,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "url"
+        const val EXTRA_PLEX = "plex"
     }
 }

@@ -166,6 +166,7 @@ object Prefs {
     private const val FILE = "radiotimes"
     private const val KEY_URL = "tvtimes_url"
     private const val KEY_LAST = "last_played"
+    private const val KEY_PLEX = "plex_links"
 
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -173,4 +174,10 @@ object Prefs {
     fun setTvtimesUrl(context: Context, url: String) = prefs(context).edit().putString(KEY_URL, url).apply()
     fun lastPlayed(context: Context): String? = prefs(context).getString(KEY_LAST, null)
     fun setLastPlayed(context: Context, url: String) = prefs(context).edit().putString(KEY_LAST, url).apply()
+    fun plexLinks(context: Context): List<String> = splitLinks(prefs(context).getString(KEY_PLEX, null).orEmpty())
+    fun setPlexLinks(context: Context, links: List<String>) =
+        prefs(context).edit().putString(KEY_PLEX, links.joinToString("\n")).apply()
+
+    /** Links typed or sent over adb, separated by spaces, commas or newlines. */
+    fun splitLinks(text: String): List<String> = text.split(Regex("[\\s,]+")).filter { it.isNotBlank() }
 }

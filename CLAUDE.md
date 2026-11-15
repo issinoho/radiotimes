@@ -31,20 +31,26 @@ from CI.
   tvdinner upstream as its own change, or into `bridge.py`, never a
   patched copy.
 - **Only tvdinner's engine modules may be imported**: `m3u`, `epg`,
-  `tvtimes`, `xtream`, `stalker`, `hdhomerun`, `vod`, `series`, `tmdb`,
-  `history`, `schedule`, `favorites`, `playback_positions`. `cli`, `player`,
+  `tvtimes`, `plex`, `xtream`, `stalker`, `hdhomerun`, `vod`, `series`,
+  `tmdb`, `history`, `schedule`, `favorites`, `playback_positions`. `cli`, `player`,
   `overlay`, `bookmarks_tui` need mpv/PIL/curses, which aren't packaged.
 - **`app/src/main/python/bridge.py` is the only boundary.** Kotlin calls
   only bridge functions (via `Engine.call`); only bridge knows tvdinner's
   API. Bridge functions return a JSON string and never raise; errors come
   back as `{"error": "..."}`. Times cross as UTC epoch milliseconds.
+- **Two engine threads**: live TV calls go through `Engine.call`, `plex_*`
+  calls through `Engine.callPlex`. bridge.py's TV state and Plex state
+  must stay disjoint, since the two can run at once (so Plex doesn't
+  wait out a ~15 s guide refresh on a Stick).
 - **Channels are keyed by stream URL**, never tvg-id (tvdinner's rule, and
   tvtimes' watchlist feed matches by URL).
 - **Never log or display a token or upstream stream URL.** Use
   `redactTokens()` and `StreamResolver.redact()` in Kotlin; bridge.py
   redacts its errors, tracebacks and tvdinner's `logging` output (which
   quotes URLs verbatim and reaches logcat via stderr). Xtream upstream URLs
-  carry provider credentials in the path.
+  carry provider credentials in the path. Plex stream and artwork URLs
+  carry `X-Plex-Token` (they must, for ExoPlayer and Coil); never log them.
+  Plex links reach the app via Settings or `--es plex`, never the repo.
 - **No tvtimes changes are assumed.** The app uses only `/api/exports/*`.
 
 ## Platform notes

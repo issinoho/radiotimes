@@ -39,7 +39,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+import requests
 from tvdinner import epg as tv_epg
+from tvdinner import plex as tv_plex
 from tvdinner.m3u import Channel, Playlist, load_playlist
 from tvdinner.tvtimes import (
     TvtimesFeed,
@@ -50,7 +52,8 @@ from tvdinner.tvtimes import (
     tvtimes_playlist_url,
 )
 
-_TOKEN_RE = re.compile(r"(token=)[^&\s'\":]+")
+# Case-insensitive: tvtimes uses `token=`, Plex `X-Plex-Token=`.
+_TOKEN_RE = re.compile(r"(token=)[^&\s'\":]+", re.IGNORECASE)
 
 
 def redact(text: str) -> str:
@@ -375,3 +378,158 @@ def watchlist() -> str:
             for e in entries
         ]
     )
+
+
+# --------------------------------------------------------------------------
+# Plex
+#
+# Any number of servers, each a `plex://host:port?X-Plex-Token=...` link
+# (tvdinner's own format). Kotlin refers to a server by its index in the
+# list given to plex_configure, and to a node by the JSON this module gave
+# it. Stream and artwork URLs carry the token -- they have to, for
+# ExoPlayer and the image loader to fetch them -- so Kotlin must never log
+# them; everything this module logs or returns as an error is redacted.
+
+_plex: list[tv_plex.PlexCreds] = []
+_plex_client_id: str | None = None
+
+
+def _plex_server(index: int) -> tv_plex.PlexCreds:
+    if not 0 <= index < len(_plex):
+        raise RuntimeError("Unknown Plex server")
+    return _plex[index]
+
+
+def _node_json(node: tv_plex.PlexNode) -> dict[str, Any]:
+    return {
+        "rating_key": node.rating_key,
+        "title": node.title,
+        "kind": node.kind,
+        "container": node.container,
+        "subtitle": node.subtitle,
+        "thumb": node.thumb_url,
+        "watched": node.watched,
+        "progress": node.watch_progress,
+        "year": node.year,
+        "series_title": node.series_title,
+        "season_thumb": node.season_thumb_url,
+    }
+
+
+def _node_from(data: dict[str, Any]) -> tv_plex.PlexNode:
+    # Dispatch in tvdinner only reads rating_key and kind; title is used in
+    # its error messages.
+    return tv_plex.PlexNode(rating_key=str(data["rating_key"]), title=str(data.get("title", "")), kind=str(data["kind"]))
+
+
+@_guarded
+def plex_configure(links_json: str, files_dir: str) -> str:
+    """Set the Plex servers from a JSON list of links (JSON rather than a
+    Java list proxy from Chaquopy). Returns one entry per link, in order:
+    `{"base_url", "name"}` for a usable one, `{"error"}` for a malformed
+    one (which keeps its slot so indexes stay aligned). `files_dir` holds
+    the persistent Plex client id, so this device stays one device in
+    Plex's dashboard across launches."""
+    global _plex, _plex_client_id
+    links = json.loads(links_json)
+    _plex_client_id = tv_plex.load_plex_client_id(Path(files_dir) / "plex_client_id.json")
+    servers: list[tv_plex.PlexCreds] = []
+    out: list[dict[str, Any]] = []
+    for link in links:
+        creds = tv_plex.parse_plex_url(str(link).strip())
+        if creds is None:
+            servers.append(tv_plex.PlexCreds(base_url="", token=""))
+            out.append({"error": "Not a Plex link. Expected plex://host:port?X-Plex-Token=..."})
+            continue
+        servers.append(creds)
+        out.append({"base_url": creds.base_url, "name": _plex_name(creds)})
+    _plex = servers
+    return _ok(out)
+
+
+def _plex_name(creds: tv_plex.PlexCreds) -> str:
+    """The server's own friendly name, or its host if it can't be reached
+    right now (tvdinner has no call for this; it's one GET of `/`)."""
+    try:
+
+        r = requests.get(
+            f"{creds.base_url}/", headers={"Accept": "application/json", "X-Plex-Token": creds.token}, timeout=5
+        )
+        r.raise_for_status()
+        name = (r.json().get("MediaContainer") or {}).get("friendlyName")
+        if name:
+            return str(name)
+    except Exception:  # noqa: BLE001 -- a name is cosmetic
+        pass
+    return creds.base_url.split("://", 1)[-1]
+
+
+@_guarded
+def plex_children(server: int, node_json: str | None = None) -> str:
+    """The libraries (plus tvdinner's "On Deck" row) when `node_json` is
+    None, else the children of that container node."""
+    creds = _plex_server(server)
+    node = _node_from(json.loads(node_json)) if node_json else None
+    nodes, error = tv_plex.list_plex_node_children(creds, node)
+    if error:
+        return _err(error)
+    return _ok([_node_json(n) for n in nodes])
+
+
+@_guarded
+def plex_search(server: int, query: str) -> str:
+    nodes, error = tv_plex.search_plex(_plex_server(server), query)
+    if error:
+        return _err(error)
+    return _ok([_node_json(n) for n in nodes])
+
+
+@_guarded
+def plex_resolve(server: int, node_json: str) -> str:
+    """A movie or episode to what the player needs: the direct-play URL,
+    the details for its info screen, where to resume, and the keys for
+    finding the next episode."""
+    item, error = tv_plex.resolve_plex_playable(_plex_server(server), _node_from(json.loads(node_json)))
+    if error or item is None:
+        return _err(error or "Nothing to play")
+
+    def marker(m: Any) -> dict[str, float] | None:
+        return {"start": m.start_seconds, "end": m.end_seconds} if m else None
+
+    return _ok(
+        {
+            "title": item.title,
+            "url": item.url,
+            "poster": item.poster_url,
+            "backdrop": item.backdrop_url,
+            "year": item.year,
+            "rating": item.rating,
+            "description": item.description,
+            "director": item.director,
+            "resume_seconds": item.resume_seconds,
+            "rating_key": item.rating_key,
+            "series_title": item.series_title,
+            "parent_rating_key": item.plex_parent_rating_key,
+            "grandparent_rating_key": item.plex_grandparent_rating_key,
+            "intro": marker(item.intro_marker),
+            "credits": marker(item.credits_marker),
+        }
+    )
+
+
+@_guarded
+def plex_next_episode(server: int, rating_key: str, parent_rating_key: str, grandparent_rating_key: str | None) -> str:
+    """The episode after this one (into the next season if need be), or null."""
+    node = tv_plex.find_next_episode(_plex_server(server), rating_key, parent_rating_key, grandparent_rating_key)
+    return _ok(_node_json(node) if node else None)
+
+
+@_guarded
+def plex_report(server: int, session_id: str, rating_key: str, state: str, position_s: float, duration_s: float) -> str:
+    """Tell Plex what's playing ("playing"/"paused"/"stopped"), which is
+    what moves its resume point and marks things watched. Failure is
+    reported but harmless."""
+    ok, error = tv_plex.report_plex_timeline(
+        _plex_server(server), _plex_client_id or "radiotimes", session_id, rating_key, state, position_s, duration_s
+    )
+    return _ok({"ok": ok}) if ok else _err(error or "report failed")

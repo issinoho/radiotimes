@@ -14,10 +14,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+import bridge
 import pytest
 import requests
-
-import bridge
 
 BASE = "http://tv.example.test:8888"
 TOKEN = "s3cret"
@@ -295,3 +294,102 @@ def test_guarded_tracebacks_are_redacted(monkeypatch, tmp_path, capfd) -> None:
     result = json.loads(bridge.load_channels())
     assert TOKEN not in result["error"]
     assert TOKEN not in capfd.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# Plex, against a fake server shaped like the real responses tvdinner parses
+
+PLEX = "http://plex.example.test:32400"
+PLEX_TOKEN = "pl3xs3cret"
+PLEX_LINK = f"plex://plex.example.test:32400?X-Plex-Token={PLEX_TOKEN}"
+
+PLEX_ROUTES: dict[str, object] = {
+    "/": {"MediaContainer": {"friendlyName": "TestPlex"}},
+    "/library/sections": {
+        "MediaContainer": {
+            "Directory": [
+                {"key": "1", "title": "Films", "type": "movie"},
+                {"key": "2", "title": "TV", "type": "show"},
+                {"key": "3", "title": "Music", "type": "artist"},
+            ]
+        }
+    },
+    "/library/sections/1/all": {
+        "MediaContainer": {
+            "Metadata": [
+                {"ratingKey": "10", "title": "Casino Royale", "type": "movie", "year": 2006, "duration": 8700000,
+                 "thumb": "/library/metadata/10/thumb/1", "viewOffset": 600000},
+            ]
+        }
+    },
+    "/library/metadata/10": {
+        "MediaContainer": {
+            "Metadata": [
+                {"ratingKey": "10", "title": "Casino Royale", "type": "movie", "year": 2006, "summary": "Bond.",
+                 "viewOffset": 600000, "Media": [{"Part": [{"key": "/library/parts/99/file.mkv"}]}]},
+            ]
+        }
+    },
+}
+
+
+@pytest.fixture
+def plex(monkeypatch: pytest.MonkeyPatch, tmp_path) -> list[str]:
+    seen: list[str] = []
+
+    def fake_get(url: str, *args: object, **kwargs: object) -> _FakeResponse:
+        seen.append(url)
+        assert url.startswith(PLEX)
+        path = url[len(PLEX):].split("?", 1)[0] or "/"
+        if path not in PLEX_ROUTES:
+            return _FakeResponse(b"", status=404)
+        return _FakeResponse(PLEX_ROUTES[path])
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    servers = json.loads(bridge.plex_configure(json.dumps([PLEX_LINK, "http://not-plex"]), str(tmp_path)))
+    assert servers[0] == {"base_url": PLEX, "name": "TestPlex"}
+    assert "error" in servers[1]  # keeps its slot so indexes line up
+    return seen
+
+
+def test_plex_root_lists_on_deck_and_video_libraries_only(plex) -> None:
+    nodes = json.loads(bridge.plex_children(0))
+    assert [(n["title"], n["kind"]) for n in nodes] == [
+        ("On Deck", "continue_watching"), ("Films", "library_movie"), ("TV", "library_show"),
+    ]
+    assert all(n["container"] for n in nodes)
+
+
+def test_plex_library_children_and_resolve(plex) -> None:
+    films = json.loads(bridge.plex_children(0))[1]
+    movies = json.loads(bridge.plex_children(0, json.dumps(films)))
+    assert movies[0]["title"] == "Casino Royale" and movies[0]["container"] is False
+    assert PLEX_TOKEN in movies[0]["thumb"]  # the image loader needs it
+    item = json.loads(bridge.plex_resolve(0, json.dumps(movies[0])))
+    assert item["url"] == f"{PLEX}/library/parts/99/file.mkv?X-Plex-Token={PLEX_TOKEN}"
+    assert item["resume_seconds"] == 600
+    assert item["description"] == "Bond."
+
+
+def test_plex_errors_never_carry_the_token(plex, monkeypatch, capfd) -> None:
+    def down(url: str, *args: object, **kwargs: object) -> None:
+        raise requests.ConnectionError(f"refused for {url}?X-Plex-Token={PLEX_TOKEN}")
+
+    monkeypatch.setattr(requests, "get", down)
+    out = bridge.plex_children(0)
+    assert "error" in json.loads(out)
+    assert PLEX_TOKEN not in out
+    assert PLEX_TOKEN not in capfd.readouterr().err
+
+
+def test_plex_unknown_server_is_an_error(plex) -> None:
+    assert "error" in json.loads(bridge.plex_children(5))
+
+
+def test_plex_name_falls_back_to_host(monkeypatch, tmp_path) -> None:
+    def down(*args: object, **kwargs: object) -> None:
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "get", down)
+    servers = json.loads(bridge.plex_configure(json.dumps([PLEX_LINK]), str(tmp_path)))
+    assert servers == [{"base_url": PLEX, "name": "plex.example.test:32400"}]

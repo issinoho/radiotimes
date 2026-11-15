@@ -79,5 +79,5 @@ object StreamResolver {
     }
 }
 
-/** Mask `token=` values in free text (probe reports, log lines). */
-fun redactTokens(text: String): String = Regex("""(token=)[^&"\s]+""").replace(text, "$1…")
+/** Mask `token=` (tvtimes) and `X-Plex-Token=` values in free text. */
+fun redactTokens(text: String): String = Regex("""(?i)(token=)[^&"\s]+""").replace(text, "$1…")

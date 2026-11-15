@@ -36,5 +36,15 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/Theme.Radiotimes.Fullscreen" />
+
+        <activity
+            android:name=".PlexActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".VodPlayerActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:theme="@style/Theme.Radiotimes.Fullscreen" />
     </application>
 </manifest>

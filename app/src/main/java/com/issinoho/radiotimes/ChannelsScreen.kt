@@ -59,6 +59,8 @@ fun ChannelsScreen(
     lastPlayed: String?,
     onPlay: (Channel, List<Channel>) -> Unit,
     onFocusChannel: (Channel, List<Channel>) -> Unit,
+    plexServers: List<PlexServer>,
+    onPlex: (PlexServer) -> Unit,
     onRetry: () -> Unit,
     onChangeLink: () -> Unit,
 ) {
@@ -80,7 +82,7 @@ fun ChannelsScreen(
                     LaunchedEffect(Unit) { runCatching { retry.requestFocus() } }
                 }
             }
-            is Tv.Lineup.Ready -> Lineup(lineup.channels, nowNext, lastPlayed, now, onPlay, onFocusChannel, onChangeLink)
+            is Tv.Lineup.Ready -> Lineup(lineup.channels, nowNext, lastPlayed, now, onPlay, onFocusChannel, plexServers, onPlex, onChangeLink)
         }
     }
 }
@@ -123,6 +125,8 @@ private fun Lineup(
     now: Long,
     onPlay: (Channel, List<Channel>) -> Unit,
     onFocusChannel: (Channel, List<Channel>) -> Unit,
+    plexServers: List<PlexServer>,
+    onPlex: (PlexServer) -> Unit,
     onSettings: () -> Unit,
 ) {
     val groups = remember(channels) { groupsOf(channels) }
@@ -185,7 +189,12 @@ private fun Lineup(
                     modifier = if (i == selectedIndex) Modifier.focusRequester(selectedGroupRequester) else Modifier,
                 )
             }
-            item(key = "settings") { SettingsRow(onSettings) }
+            plexServers.filter { it.error == null }.forEachIndexed { i, server ->
+                item(key = "plex${server.index}") {
+                    RailButton("▶  ${server.name}", topGap = if (i == 0) 14.dp else 2.dp) { onPlex(server) }
+                }
+            }
+            item(key = "settings") { RailButton("⚙  Settings", topGap = 14.dp, onClick = onSettings) }
         }
         LazyColumn(
             state = listState,
@@ -211,13 +220,14 @@ private fun Lineup(
     }
 }
 
+/** A rail entry that does something on OK rather than selecting a group (Plex servers, Settings). */
 @Composable
-private fun SettingsRow(onClick: () -> Unit) {
+private fun RailButton(label: String, topGap: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
     var hasFocus by remember { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .padding(top = 14.dp)
+            .padding(top = topGap)
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(if (hasFocus) Palette.focus else Color.Transparent)
@@ -225,7 +235,7 @@ private fun SettingsRow(onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 9.dp),
     ) {
-        Text("⚙  Settings", color = if (hasFocus) Palette.text else Palette.dim, fontSize = 15.sp)
+        Text(label, color = if (hasFocus) Palette.text else Palette.dim, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
