@@ -45,6 +45,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -150,7 +151,11 @@ class PlayerActivity : ComponentActivity() {
                 2_000,
             )
             .build()
-        val exo = ExoPlayer.Builder(this)
+        // Platform decoders first; FFmpeg (see build.gradle.kts) only for
+        // formats they can't handle, such as MPEG Layer II audio.
+        val renderers = DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        val exo = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http, LiveExtractorsFactory()))
             .setLoadControl(loadControl)
             .build()

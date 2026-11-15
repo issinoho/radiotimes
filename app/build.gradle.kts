@@ -97,4 +97,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+    // Software audio decoding for what the Stick's MediaCodec lacks: MPEG-1
+    // Layer II, the audio of every UK DVB SD channel (an HDHomeRun's
+    // BBC TWO etc.), plays silent without it. Jellyfin's prebuilt FFmpeg
+    // build of Media3's decoder_ffmpeg, for the same Media3 1.5 line.
+    // GPL-3.0, accepted by the project owner for this app.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
 }
