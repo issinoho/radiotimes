@@ -44,6 +44,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -137,16 +138,31 @@ class PlayerActivity : ComponentActivity() {
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(15_000)
+        // Start playing after 1 s of media rather than ExoPlayer's default
+        // 2.5 s: channel changes are what live TV is judged on, and on the
+        // Stick first frame was 2-6 s. After a stall it waits 2 s (default
+        // 5 s) so a weak stream doesn't stutter straight back into one.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS,
+                1_000,
+                2_000,
+            )
+            .build()
         val exo = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(this).setDataSourceFactory(http))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(http, LiveExtractorsFactory()))
+            .setLoadControl(loadControl)
             .build()
         exo.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() {
                 val f = exo.videoFormat
+                val a = exo.audioFormat
                 Log.i(
                     TAG,
                     "play | first frame ${SystemClock.elapsedRealtime() - tuneStarted} ms · " +
-                        "${f?.sampleMimeType} ${f?.width}x${f?.height} · codecs ${f?.codecs}",
+                        "${f?.sampleMimeType} ${f?.width}x${f?.height} · codecs ${f?.codecs} · " +
+                        "audio ${a?.let { "${it.sampleMimeType} ${it.channelCount}ch ${it.sampleRate} Hz" } ?: "none"}",
                 )
                 status.value = Status.Playing
                 showBanner()
