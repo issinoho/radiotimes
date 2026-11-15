@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 
 /**
  * Links, entered once. Three ways in, easiest first: scan the QR code and
@@ -68,12 +69,12 @@ fun SetupScreen(
     val field = remember { FocusRequester() }
     val connect = remember { FocusRequester() }
 
-    Row(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 36.dp), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
+    Row(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 28.dp), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("radiotimes", color = Palette.text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Pair with tvtimes (enter the code it shows in tvtimes → Settings → Devices), or paste your " +
-                    "tvtimes link (Settings → Export feeds) from your phone using the code on the right.",
+                "Pair with tvtimes, or send your tvtimes link (Settings → Export feeds) from your phone " +
+                    "with the code on the right.",
                 color = Palette.dim, fontSize = 16.sp,
             )
             var pairing by remember { mutableStateOf(false) }
@@ -104,10 +105,9 @@ fun SetupScreen(
                 }
                 if (canCancel) OutlinedButton(onClick = onCancel, modifier = Modifier.focusRing()) { Text("Cancel") }
             }
-            Text(
-                "From a computer: adb shell am start -n com.issinoho.radiotimes/.MainActivity --es url '…' --es plex '…'",
-                color = Palette.dim, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-            )
+            // (Sending links from a computer with adb is in the README; the
+            // line that described it here ran off the bottom of the screen.)
+            UpdateCheck()
             }
         }
         Column(
@@ -134,6 +134,66 @@ fun SetupScreen(
     // straight away (Android TV does; Fire TV's can trap the remote).
     LaunchedEffect(Unit) {
         if (valid) runCatching { connect.requestFocus() }
+    }
+}
+
+/**
+ * "Check for updates": asks GitHub now (not waiting for the hourly check)
+ * and, when there's a newer release, downloads it and opens the system
+ * installer. The first time, Fire OS asks to allow radiotimes to install
+ * apps; after allowing it, press Update again.
+ */
+@Composable
+private fun UpdateCheck() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var status by remember { mutableStateOf<String?>(null) }
+    var newer by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    // The Check button turns into Update: keep focus on it rather than
+    // letting it fall back to the top of the screen.
+    val update = remember { FocusRequester() }
+    LaunchedEffect(newer) { if (newer != null) runCatching { update.requestFocus() } }
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("radiotimes ${BuildConfig.VERSION_NAME}", color = Palette.dim, fontSize = 14.sp)
+        val version = newer
+        if (version == null) {
+            OutlinedButton(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    status = "Checking…"
+                    scope.launch {
+                        status = when (val found = Updates.checkNow(context)) {
+                            is Updates.Found.Newer -> { newer = found.version; "radiotimes ${found.version} is available." }
+                            Updates.Found.Current -> "You have the latest version."
+                            is Updates.Found.Failed -> found.message
+                        }
+                        busy = false
+                    }
+                },
+                modifier = Modifier.focusRing(),
+            ) { Text("Check for updates") }
+        } else {
+            Button(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    status = "Downloading $version…"
+                    scope.launch {
+                        val result = Updates.downloadAndInstall(context, version) { pct -> status = "Downloading $version…  $pct%" }
+                        status = when (result) {
+                            Updates.Install.Started -> "Confirm the update on the next screen."
+                            Updates.Install.NeedsPermission -> "Allow radiotimes to install apps, then press Update again."
+                            is Updates.Install.Failed -> result.message
+                        }
+                        busy = false
+                    }
+                },
+                modifier = Modifier.focusRequester(update).focusRing(),
+            ) { Text("Update to $version") }
+        }
+        status?.let { Text(it, color = Palette.dim, fontSize = 14.sp, maxLines = 2) }
     }
 }
 

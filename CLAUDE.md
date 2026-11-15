@@ -68,6 +68,13 @@ from CI.
 
 ## Platform notes
 
+- In-app updates (`Updates.downloadAndInstall`) download only the GitHub
+  release asset over https, check the archive is this package with a
+  higher versionCode, and hand it to the system installer through the
+  `FileProvider` (`res/xml/update_paths.xml`: just `cache/updates/`).
+  Android refuses an update signed with a different key, which is also
+  why a debug build can't update to a release (or back) this way.
+
 - Fire OS 7 = API 28 (minSdk), Fire OS 8 = API 30. Older Sticks are 32-bit
   `armeabi-v7a`, which is why Chaquopy is on Python 3.11: no Chaquopy
   3.12+ target ships that ABI (checked on Maven Central).

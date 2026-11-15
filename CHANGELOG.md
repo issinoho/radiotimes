@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Settings → Check for updates**: asks GitHub at once and, when a
+  newer radiotimes is out, **Update to X** downloads it and opens Fire
+  OS's installer, so updating no longer needs Downloader. The first time,
+  Fire OS asks you to allow radiotimes to install apps; allow it and
+  press Update again. Android only accepts an update signed with the
+  same key as the installed app, and radiotimes checks the download is
+  a newer radiotimes before handing it over.
+
 - **The update notice shows within the hour** of a release: radiotimes
   now asks GitHub at most hourly (was every 12 hours, so a TV that had
   just checked wouldn't notice a new release until the next day).

@@ -49,8 +49,9 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   subtitle files; **subtitles found online** through the Plex server's
   own search (☰ → Find subtitles online); progress reported back to
   Plex; the next episode starts when one ends.
-- **Updates:** when a newer release is out, the channel list says so,
-  with the Downloader code to fetch it.
+- **Updates:** when a newer release is out, the channel list says so.
+  **Settings → Check for updates** checks at once and installs it (the
+  first time, Fire OS asks to allow radiotimes to install apps).
 
 Phase 0 measured the engine on a Fire TV Stick (Fire OS 8, 32-bit ARM):
 channel list 0.4 s, guide from cache 0.4 s, fresh guide ~15 s for an 11.6 MB
