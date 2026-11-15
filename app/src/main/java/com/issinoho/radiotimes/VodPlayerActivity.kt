@@ -330,6 +330,29 @@ class VodPlayerActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val v = view
         val ok = event.keyCode in intArrayOf(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)
+        // The remote's media keys work at any time. Left to PlayerView they
+        // only reach it once it has focus, i.e. after OK showed the
+        // controller -- so play/pause did nothing until OK was pressed.
+        val media = intArrayOf(
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK, KeyEvent.KEYCODE_MEDIA_PLAY,
+            KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_MEDIA_REWIND,
+        )
+        val exo = player
+        if (exo != null && event.keyCode in media) {
+            val seek = event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND
+            // On the press only; ⏩/⏪ also on key repeat (held down).
+            if (event.action == KeyEvent.ACTION_DOWN && (event.repeatCount == 0 || seek)) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> exo.playWhenReady = !exo.playWhenReady
+                    KeyEvent.KEYCODE_MEDIA_PLAY -> exo.playWhenReady = true
+                    KeyEvent.KEYCODE_MEDIA_PAUSE -> exo.playWhenReady = false
+                    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> exo.seekForward()
+                    KeyEvent.KEYCODE_MEDIA_REWIND -> exo.seekBack()
+                }
+                v?.showController()
+            }
+            return true
+        }
         // ☰ / Info: the full details panel, on and off.
         if (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_INFO) {
             if (event.action == KeyEvent.ACTION_UP) info.value = if (info.value == Info.Full) Info.None else Info.Full

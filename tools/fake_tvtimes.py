@@ -19,12 +19,21 @@ TOKEN = "testtoken"
 HLS = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
 GROUPS = ["UK", "News", "Movies", "Sport", "Kids"]
 CH = [(i, f"{GROUPS[i % 5]} {i:02d}", GROUPS[i % 5]) for i in range(1, 61)]
+# Real logos for the first few channels, a mix of kinds: TCM is black on
+# transparent (needs inverting on a dark tile), the others are coloured.
+LOGOS = [
+    "https://static.epg.best/us/TurnerClassicMovies.us.png",
+    "https://static.epg.best/us/CNN.us.png",
+    "https://static.epg.best/uk/Channel4.uk.png",
+    "https://static.epg.best/us/HBO.us.png",
+]
 TITLES = ["The Evening News", "Quiz Night", "A Very Long Documentary About the History of Lighthouses", "Film: The Big Heist", "Football Live", "Cartoons", "Weather"]
 
 def playlist():
     out = [f'#EXTM3U url-tvg="{HOST}/api/exports/epg.xml?token={TOKEN}"']
     for i, name, g in CH:
-        out.append(f'#EXTINF:-1 tvg-id="{i}" tvg-name="{name}" group-title="{g}",{name}')
+        logo = f' tvg-logo="{LOGOS[i - 1]}"' if i <= len(LOGOS) else ""
+        out.append(f'#EXTINF:-1 tvg-id="{i}" tvg-name="{name}"{logo} group-title="{g}",{name}')
         out.append(f"{HOST}/api/exports/stream/{i}?token={TOKEN}")
     return "\n".join(out) + "\n"
 

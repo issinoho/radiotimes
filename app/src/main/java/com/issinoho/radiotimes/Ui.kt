@@ -101,8 +101,15 @@ fun ChannelLogo(channel: Channel, width: Dp, height: Dp, modifier: Modifier = Mo
         contentAlignment = Alignment.Center,
     ) {
         if (channel.logo != null) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val request = remember(channel.logo) {
+                coil.request.ImageRequest.Builder(context)
+                    .data(channel.logo)
+                    .transformations(LegibleLogo)
+                    .build()
+            }
             AsyncImage(
-                model = channel.logo,
+                model = request,
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.padding(4.dp).fillMaxWidth().fillMaxHeight(),
