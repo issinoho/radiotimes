@@ -89,6 +89,9 @@ class VodPlayerActivity : ComponentActivity() {
     private val info = mutableStateOf(Info.None)
     private val positionMs = mutableStateOf(0L)
     private val picture = mutableStateOf(PictureMode.Fit)
+    /** Whether the item has any subtitle track (file or Plex sidecar), and whether one is showing. */
+    private val textAvailable = mutableStateOf(false)
+    private val textOn = mutableStateOf(false)
     private var okHeld = false
     /** The ☰ panel's subtitle search: null = showing the panel's buttons. */
     private val subtitleSearch = mutableStateOf<SubtitleSearch?>(null)
@@ -138,6 +141,8 @@ class VodPlayerActivity : ComponentActivity() {
                             d, positionMs.value, durationMs.value, Modifier.align(Alignment.CenterStart),
                             picture = picture.value,
                             onPicture = ::cyclePicture,
+                            subtitles = if (textAvailable.value) textOn.value else null,
+                            onSubtitles = ::toggleSubtitles,
                             search = subtitleSearch.value,
                             onFindSubtitles = ::findSubtitles,
                             onPickSubtitle = ::attachSubtitle,
@@ -213,6 +218,12 @@ class VodPlayerActivity : ComponentActivity() {
                     "vod | ${item.title} first frame ${SystemClock.elapsedRealtime() - started} ms · " +
                         "${f?.sampleMimeType} ${f?.width}x${f?.height} · audio ${a?.sampleMimeType} ${a?.channelCount}ch",
                 )
+            }
+
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                textAvailable.value = text.any { it.isSupported }
+                textOn.value = text.any { it.isSelected }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -316,6 +327,22 @@ class VodPlayerActivity : ComponentActivity() {
         return MediaItem.Builder().setUri(it.url).setSubtitleConfigurations(subtitles).build()
     }
 
+    /** ☰ panel: subtitles off, or back on (a track in the device's language, else any). */
+    private fun toggleSubtitles() {
+        val exo = player ?: return
+        val on = !textOn.value
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !on)
+            .apply {
+                if (on) {
+                    setPreferredTextLanguage(java.util.Locale.getDefault().language)
+                    setSelectUndeterminedTextLanguage(true)
+                }
+            }
+            .build()
+        showNotice(if (on) "Subtitles on" else "Subtitles off")
+    }
+
     private fun cyclePicture() {
         val mode = picture.value.next()
         picture.value = mode
@@ -363,6 +390,9 @@ class VodPlayerActivity : ComponentActivity() {
             item = item.copy(sidecars = sidecars)
             val exo = player ?: return@launch
             val position = exo.currentPosition
+            // Subtitles may have been switched off in the panel; a new pick means on.
+            exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).build()
             exo.setMediaItem(mediaItem(item, selected = added.url), position)
             exo.prepare()
             Log.i(TAG, "vod | subtitles attached from Plex's online search (${added.language ?: "?"})")
@@ -573,6 +603,8 @@ private fun PlexNowPlayingFull(
     modifier: Modifier,
     picture: PictureMode,
     onPicture: () -> Unit,
+    subtitles: Boolean?,
+    onSubtitles: () -> Unit,
     search: SubtitleSearch?,
     onFindSubtitles: () -> Unit,
     onPickSubtitle: (SubtitleResult) -> Unit,
@@ -580,7 +612,7 @@ private fun PlexNowPlayingFull(
     val now = rememberNow()
     Column(
         modifier
-            .width(560.dp)
+            .width(620.dp)
             .fillMaxHeight()
             .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xF20B0A1F), Color(0xCC0B0A1F), Color.Transparent)))
             .padding(start = 48.dp, end = 40.dp, top = 28.dp, bottom = 24.dp),
@@ -610,7 +642,7 @@ private fun PlexNowPlayingFull(
             Text("${left / 60_000} min left  ·  ends at ${clockText(now + left)}", color = Palette.dim, fontSize = 14.sp)
         }
         androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
-        PanelOptions(picture, onPicture, search, onFindSubtitles, onPickSubtitle)
+        PanelOptions(picture, onPicture, subtitles, onSubtitles, search, onFindSubtitles, onPickSubtitle)
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         Text(if (search != null) "Back: return" else "☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
     }
@@ -621,6 +653,8 @@ private fun PlexNowPlayingFull(
 private fun PanelOptions(
     picture: PictureMode,
     onPicture: () -> Unit,
+    subtitles: Boolean?,
+    onSubtitles: () -> Unit,
     search: SubtitleSearch?,
     onFindSubtitles: () -> Unit,
     onPickSubtitle: (SubtitleResult) -> Unit,
@@ -633,13 +667,19 @@ private fun PanelOptions(
         }
     }
     when (search) {
-        null -> androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
+        null -> androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
             androidx.compose.material3.OutlinedButton(
                 onClick = onPicture,
                 modifier = Modifier.focusRequester(first).focusRing(),
             ) { Text("Picture: ${picture.label}") }
+            // Only when there's a subtitle track to show or hide.
+            if (subtitles != null) {
+                androidx.compose.material3.OutlinedButton(onClick = onSubtitles, modifier = Modifier.focusRing()) {
+                    Text(if (subtitles) "Subtitles: On" else "Subtitles: Off")
+                }
+            }
             androidx.compose.material3.OutlinedButton(onClick = onFindSubtitles, modifier = Modifier.focusRing()) {
-                Text("Find subtitles online")
+                Text("Find subtitles")
             }
         }
         SubtitleSearch.Searching -> Text("Searching Plex's online subtitles…", color = Palette.text, fontSize = 15.sp)

@@ -84,7 +84,7 @@ Next:
 | | OK on Resume / Play | play |
 | | Back | up a level |
 | Plex player | OK | controls and what's playing (again: pause) — or press the Skip / Next episode button when it shows |
-| | ☰ / Info | full details of what's playing, picture size, find subtitles online |
+| | ☰ / Info | full details of what's playing, picture size, subtitles on/off, find subtitles online |
 | | ⏯ ⏩ ⏪ | play/pause, forward 30 s, back 10 s |
 | Live TV and Plex | hold OK | picture size: Fit → Zoom → Stretch |
 | | ↑ ↓ ← → | show the seek bar and controls |

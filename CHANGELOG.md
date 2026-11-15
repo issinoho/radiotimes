@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+- **Subtitles on/off in the Plex ☰ panel**: a "Subtitles: On / Off"
+  button, shown whenever the item has subtitles (in the file or attached
+  in Plex). Turning them back on picks a track in the device's language.
+  Attaching subtitles online always switches them on.
+
 ## 0.5.0
 
 - **Picture size**: Fit, Zoom (fills the screen, crops the edges -- for
