@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1
 
 - **Long Plex descriptions scroll**: on a film or episode's details
   page and in the playback ☰ panel, the whole synopsis is shown and
