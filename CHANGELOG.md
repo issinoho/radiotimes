@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.2
 
 - **Settings says plainly what's connected**: a tvtimes section ("✓
   Connected · 553 channels · your-host", or "✗ Not connected") with
