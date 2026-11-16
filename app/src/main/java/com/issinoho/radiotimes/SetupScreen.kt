@@ -263,7 +263,7 @@ internal fun QrCode(text: String, modifier: Modifier) {
 }
 
 /** The token is never shown (CLAUDE.md), only its length; editing still works. */
-private object MaskToken : VisualTransformation {
+internal object MaskToken : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val masked = Regex("""(?i)(token=)([^&,\s]*)""").replace(text.text) { m ->
             m.groupValues[1] + "•".repeat(m.groupValues[2].length)

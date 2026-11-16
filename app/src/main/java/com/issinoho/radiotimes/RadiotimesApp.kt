@@ -18,6 +18,14 @@ class RadiotimesApp : Application() {
         if (!Python.isStarted()) Python.start(AndroidPlatform(this))
         pythonStartMs = SystemClock.elapsedRealtime() - started
         Log.i(TAG, "python started in ${pythonStartMs} ms")
+        // Bring the engines up here, not only in MainActivity: when Android
+        // restarts the process straight into a Plex or player screen (after
+        // a crash, or a low-memory kill in the background), MainActivity
+        // never runs, and Plex answered "Unknown Plex server". Both calls
+        // are no-ops when MainActivity repeats them.
+        Tv.init(this)
+        Plex.configure(Prefs.plexLinks(this), filesDir.absolutePath)
+        Prefs.tvtimesUrl(this)?.let { if (Tv.lineup.value == Tv.Lineup.Idle) Tv.connect(it, cacheDir.absolutePath) }
     }
 
     companion object {

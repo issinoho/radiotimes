@@ -43,6 +43,9 @@ import kotlinx.coroutines.delay
 /**
  * First run: Welcome → tvtimes → Plex (optional) → Ready.
  *
+ * Each step leads with the code-based way (tvtimes pairing, plex.tv/link);
+ * the phone page and typed links sit behind "Other ways to connect".
+ *
  * Shown only on a fresh install (no tvtimes link yet). The phone setup page
  * ([SetupServer]) runs for the whole wizard, so a phone can send the
  * tvtimes link and any Plex links in one go; the steps just show what has
@@ -110,7 +113,7 @@ private fun Welcome(onNext: () -> Unit) {
         Text(
             "Your tvtimes line-up and guide, with the picture still playing while you browse, and your Plex " +
                 "libraries alongside. Setting up takes a minute, and you won't have to type a token with the remote: " +
-                "the TV pairs with tvtimes, or your phone sends the link.",
+                "the TV pairs with tvtimes and links to your Plex account with short codes.",
             color = Palette.dim, fontSize = 19.sp, lineHeight = 28.sp,
         )
         Text("You'll need to be signed in to tvtimes on a phone or computer and, optionally, a Plex account.", color = Palette.dim, fontSize = 16.sp)
@@ -136,8 +139,20 @@ private fun PhoneCard(phoneUrl: String?, title: String, modifier: Modifier = Mod
     }
 }
 
+/** "Other ways…": the phone page and typing, kept as a fallback behind one button. */
+@Composable
+private fun OtherWays(onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.focusRing()) { Text("Other ways to connect") }
+}
+
+/**
+ * tvtimes: pairing first (no link or token to handle). The phone page and a
+ * typed link are a fallback for a tvtimes without pairing or one the TV
+ * can't find; links a phone sends still arrive while this step is open.
+ */
 @Composable
 private fun TvtimesStep(phoneUrl: String?, lineup: Tv.Lineup, onTvtimes: (String) -> Unit, onNext: () -> Unit) {
+    var fallback by remember { mutableStateOf(false) }
     var typing by remember { mutableStateOf(false) }
     var pairing by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf("") }
@@ -145,20 +160,22 @@ private fun TvtimesStep(phoneUrl: String?, lineup: Tv.Lineup, onTvtimes: (String
     Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Connect your tvtimes guide", color = Palette.text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            // Shorter once "Other ways" opens: the phone card halves the width.
             Text(
-                "Pair this TV: it finds tvtimes on your network and shows a code to enter in tvtimes under " +
-                    "Settings → Devices. No link or token to copy.",
+                if (fallback) "Pair this TV: enter the code it shows in tvtimes under Settings → Devices."
+                else "Pair this TV with tvtimes: it finds tvtimes on your network and shows a code to enter in " +
+                    "tvtimes under Settings → Devices. No link or token to copy.",
                 color = Palette.dim, fontSize = 17.sp, lineHeight = 26.sp,
             )
             if (lineup !is Tv.Lineup.Ready && lineup != Tv.Lineup.Loading) {
-                PairWithTvtimes(focusFirst = !typing, onLinked = onTvtimes, onBusy = { pairing = it })
+                PairWithTvtimes(focusFirst = !fallback, onLinked = onTvtimes, onBusy = { pairing = it })
             }
             Spacer(Modifier.height(4.dp))
             when (lineup) {
                 Tv.Lineup.Idle -> {}
-                Tv.Lineup.Loading -> Text("Link received. Connecting to tvtimes…", color = Palette.text, fontSize = 18.sp)
+                Tv.Lineup.Loading -> Text("Connecting to tvtimes…", color = Palette.text, fontSize = 18.sp)
                 is Tv.Lineup.Failed -> Text(
-                    "That didn't work: ${redactTokens(lineup.message)}. Check the link and send it again.",
+                    "That didn't work: ${redactTokens(lineup.message)}. Try pairing again, or another way.",
                     color = Palette.warn, fontSize = 17.sp,
                 )
                 is Tv.Lineup.Ready -> {
@@ -168,58 +185,107 @@ private fun TvtimesStep(phoneUrl: String?, lineup: Tv.Lineup, onTvtimes: (String
                 }
             }
             if (lineup !is Tv.Lineup.Ready && !pairing) {
-                Text(
-                    "Or, from your phone: scan the code, then paste your tvtimes link (tvtimes → Settings → Export feeds).",
-                    color = Palette.dim, fontSize = 15.sp, lineHeight = 22.sp,
-                )
-                if (!typing) {
-                    OutlinedButton(onClick = { typing = true }, modifier = Modifier.focusRing()) {
-                        Text("Type the link with the remote")
-                    }
+                if (!fallback) {
+                    OtherWays { fallback = true }
                 } else {
-                    OutlinedTextField(
-                        value = url,
-                        onValueChange = { url = it },
-                        label = { Text("tvtimes link") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = { if (valid) onTvtimes(url.trim()) }),
-                        modifier = Modifier.fillMaxWidth(),
+                    Text(
+                        "Or send your tvtimes link (Settings → Export feeds) from your phone with the code on the " +
+                            "right, or type it.",
+                        color = Palette.dim, fontSize = 15.sp, lineHeight = 22.sp,
                     )
-                    Button(onClick = { onTvtimes(url.trim()) }, enabled = valid, modifier = Modifier.focusRing()) { Text("Connect") }
+                    if (!typing) {
+                        val type = rememberFirstFocus()
+                        OutlinedButton(onClick = { typing = true }, modifier = Modifier.focusRequester(type).focusRing()) {
+                            Text("Type the link with the remote")
+                        }
+                    } else {
+                        // Field and button on one row, so the button stays on screen.
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = url,
+                                onValueChange = { url = it },
+                                label = { Text("tvtimes link") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { if (valid) onTvtimes(url.trim()) }),
+                                visualTransformation = MaskToken,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Button(onClick = { onTvtimes(url.trim()) }, enabled = valid, modifier = Modifier.focusRing()) { Text("Connect") }
+                        }
+                    }
                 }
             }
         }
-        PhoneCard(phoneUrl, "Your phone")
+        if (fallback && lineup !is Tv.Lineup.Ready) PhoneCard(phoneUrl, "Your phone")
     }
 }
 
+/**
+ * Plex: plex.tv/link first (every server on the account, no tokens). Sending
+ * plex:// links from the phone, or typing them, is the fallback.
+ */
 @Composable
 private fun PlexStep(phoneUrl: String?, servers: List<PlexServer>, onPlexLinked: (List<String>) -> Unit, onNext: () -> Unit) {
     val usable = servers.filter { it.error == null }
+    var fallback by remember { mutableStateOf(false) }
+    var typing by remember { mutableStateOf(false) }
+    var links by remember { mutableStateOf("") }
+    val validLinks = Prefs.splitLinks(links).let { l -> l.isNotEmpty() && l.all { it.startsWith("plex://") && "token=" in it.lowercase() } }
     Row(horizontalArrangement = Arrangement.spacedBy(40.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text("Add Plex (optional)", color = Palette.text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Link your Plex account and every server on it appears next to your channels, with resume and " +
-                    "next episode kept in step with your other Plex apps. Or send plex:// links from your phone.",
+                if (fallback) "Link your Plex account: enter the code the TV shows at plex.tv/link."
+                else "Link your Plex account: go to plex.tv/link on your phone or computer and enter the code the TV " +
+                    "shows. Every server on the account appears next to your channels, with resume and next episode " +
+                    "kept in step with your other Plex apps.",
                 color = Palette.dim, fontSize = 17.sp, lineHeight = 26.sp,
             )
             if (usable.isNotEmpty()) {
                 Text("Found ✓  ${usable.joinToString(", ") { it.name }}", color = Palette.accent, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlexLink(focusFirst = usable.isEmpty(), showTitle = false, onLinked = onPlexLinked)
+                PlexLink(focusFirst = usable.isEmpty() && !fallback, showTitle = false, onLinked = onPlexLinked)
             }
             Spacer(Modifier.height(6.dp))
             val next = rememberFirstFocus(usable.size)
-            if (usable.isNotEmpty()) {
-                Button(onClick = onNext, modifier = Modifier.focusRequester(next).focusRing()) { Text("Next") }
-            } else {
-                OutlinedButton(onClick = onNext, modifier = Modifier.focusRing()) { Text("Skip Plex") }
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (usable.isNotEmpty()) {
+                    Button(onClick = onNext, modifier = Modifier.focusRequester(next).focusRing()) { Text("Next") }
+                } else {
+                    OutlinedButton(onClick = onNext, modifier = Modifier.focusRing()) { Text("Skip Plex") }
+                }
+                if (!fallback) OtherWays { fallback = true }
+            }
+            if (fallback) {
+                Text(
+                    "Or send plex:// links from your phone with the code on the right, or type them.",
+                    color = Palette.dim, fontSize = 15.sp, lineHeight = 22.sp,
+                )
+                if (!typing) {
+                    val type = rememberFirstFocus()
+                    OutlinedButton(onClick = { typing = true }, modifier = Modifier.focusRequester(type).focusRing()) {
+                        Text("Type Plex links with the remote")
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = links,
+                            onValueChange = { links = it },
+                            label = { Text("Plex links, separated by spaces") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { if (validLinks) onPlexLinked(Prefs.splitLinks(links)) }),
+                            visualTransformation = MaskToken,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Button(onClick = { onPlexLinked(Prefs.splitLinks(links)) }, enabled = validLinks, modifier = Modifier.focusRing()) { Text("Add") }
+                    }
+                }
             }
         }
-        PhoneCard(phoneUrl, "Or from your phone")
+        if (fallback) PhoneCard(phoneUrl, "Your phone")
     }
 }
 

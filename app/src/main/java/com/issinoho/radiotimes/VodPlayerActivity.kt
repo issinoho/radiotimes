@@ -30,7 +30,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -99,6 +100,8 @@ class VodPlayerActivity : ComponentActivity() {
     private var okHeld = false
     /** The ☰ panel's subtitle search: null = showing the panel's buttons. */
     private val subtitleSearch = mutableStateOf<SubtitleSearch?>(null)
+    /** The ☰ panel's details (synopsis, credits) scroll with ↑/↓; back to the top each time it opens. */
+    private val panelScroll = androidx.compose.foundation.ScrollState(0)
     private val durationMs = mutableStateOf(0L)
     /** "Skip intro" / "Skip credits" / "Next episode", while inside a Plex marker. */
     private val skip = mutableStateOf<String?>(null)
@@ -153,6 +156,7 @@ class VodPlayerActivity : ComponentActivity() {
                             search = subtitleSearch.value,
                             onFindSubtitles = ::findSubtitles,
                             onPickSubtitle = ::attachSubtitle,
+                            scroll = panelScroll,
                         )
                     }
                     skip.value?.let {
@@ -526,7 +530,10 @@ class VodPlayerActivity : ComponentActivity() {
                 val open = info.value != Info.Full
                 info.value = if (open) Info.Full else Info.None
                 subtitleSearch.value = null
-                if (open) v?.hideController()
+                if (open) {
+                    v?.hideController()
+                    lifecycleScope.launch { panelScroll.scrollTo(0) }
+                }
             }
             return true
         }
@@ -535,6 +542,22 @@ class VodPlayerActivity : ComponentActivity() {
         if (event.keyCode == KeyEvent.KEYCODE_BACK && info.value == Info.Full) {
             if (event.action == KeyEvent.ACTION_UP) {
                 if (subtitleSearch.value != null) subtitleSearch.value = null else info.value = Info.None
+            }
+            return true
+        }
+        // ↑/↓ scroll the panel's details (its buttons sit in one row, so the
+        // keys are otherwise unused) -- except in the subtitle results list.
+        if (info.value == Info.Full && subtitleSearch.value == null &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_UP || event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val step = PANEL_SCROLL_DP * resources.displayMetrics.density
+                // A plain step, not animateScrollBy: an animation needs the
+                // composition's frame clock, which lifecycleScope doesn't have
+                // (it crashed the app).
+                lifecycleScope.launch {
+                    panelScroll.scrollBy(if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) step else -step)
+                }
             }
             return true
         }
@@ -572,6 +595,8 @@ class VodPlayerActivity : ComponentActivity() {
 
     companion object {
         private const val EXTRA_SERVER = "server"
+        /** About four lines of the synopsis per ↑/↓ press. */
+        private const val PANEL_SCROLL_DP = 92f
         private const val EXTRA_ITEM = "item"
         private const val EXTRA_FROM_START = "from_start"
 
@@ -674,6 +699,7 @@ private fun PlexNowPlayingFull(
     search: SubtitleSearch?,
     onFindSubtitles: () -> Unit,
     onPickSubtitle: (SubtitleResult) -> Unit,
+    scroll: androidx.compose.foundation.ScrollState,
 ) {
     val now = rememberNow()
     Column(
@@ -689,12 +715,12 @@ private fun PlexNowPlayingFull(
             d.season?.let { "Season $it" }, d.episode?.let { "Episode $it" },
         ).joinToString("  ·  ")
         // Everything above the hint lives in one column that takes the panel's
-        // height; within it the details give way first (clipped), so the
-        // progress, the buttons and the hint below always stay on screen
-        // however long the synopsis, cast and file lines run.
+        // height; within it the details give way first -- scrolling, with
+        // ↑/↓ -- so the progress, the buttons and the hint below always stay
+        // on screen however long the synopsis, cast and file lines run.
         Column(Modifier.weight(1f), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
         Column(
-            Modifier.weight(1f, fill = false).clipToBounds(),
+            Modifier.weight(1f, fill = false).verticalScroll(scroll),
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
         ) {
         if (heading.isNotEmpty()) Text(heading, color = Palette.dim, fontSize = 16.sp)
@@ -708,7 +734,8 @@ private fun PlexNowPlayingFull(
         val full = search == null
         if (full) d.tagline?.let { Text(it, color = Palette.dim, fontSize = 15.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic) }
         // Bounded so the panel's buttons stay on screen (1080p is 540dp tall).
-        if (full) d.description?.let { Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 5, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+        // In full: the details scroll, so nothing needs cutting short.
+        if (full) d.description?.let { Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp) }
         if (full) d.director?.let { Text("Director  $it", color = Palette.dim, fontSize = 14.sp) }
         if (full && d.cast.isNotEmpty()) Text("Cast  ${d.cast.joinToString(", ")}", color = Palette.dim, fontSize = 14.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         if (full) d.studio?.let { Text("Studio  $it", color = Palette.dim, fontSize = 14.sp) }
@@ -722,7 +749,13 @@ private fun PlexNowPlayingFull(
         androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
         PanelOptions(picture, onPicture, subtitles, onSubtitles, search, onFindSubtitles, onPickSubtitle)
         }
-        Text(if (search != null) "Back: return" else "☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
+        val more = when {
+            search != null || scroll.maxValue == 0 -> ""
+            scroll.value == 0 -> "↓ more  ·  "
+            scroll.value >= scroll.maxValue -> "↑ back up  ·  "
+            else -> "↑↓ scroll  ·  "
+        }
+        Text(if (search != null) "Back: return" else "$more☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
     }
 }
 

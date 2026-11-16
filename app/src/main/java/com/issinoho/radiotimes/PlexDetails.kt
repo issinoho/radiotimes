@@ -21,6 +21,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -84,7 +92,21 @@ private fun clock(seconds: Double): String {
  */
 @Composable
 fun PlexDetailScreen(detail: PlexDetail, onPlay: (fromStart: Boolean) -> Unit) {
-    Box(Modifier.fillMaxSize()) {
+    // The synopsis and credits scroll with ↑/↓: focus sits on the one row of
+    // buttons, so the keys are otherwise unused. Seen here first, before
+    // focus handling, as the buttons' ancestor.
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val step = with(androidx.compose.ui.platform.LocalDensity.current) { 92.dp.toPx() }
+    LaunchedEffect(detail.json) { scroll.scrollTo(0) }
+    Box(
+        Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+            val down = e.key == Key.DirectionDown
+            if (!down && e.key != Key.DirectionUp) return@onPreviewKeyEvent false
+            if (e.type == KeyEventType.KeyDown) scope.launch { scroll.animateScrollBy(if (down) step else -step) }
+            true
+        },
+    ) {
         detail.backdrop?.let {
             AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
@@ -108,9 +130,11 @@ fun PlexDetailScreen(detail: PlexDetail, onPlay: (fromStart: Boolean) -> Unit) {
                     color = Palette.text, fontSize = 16.sp,
                 )
                 if (detail.genres.isNotEmpty()) Text(detail.genres.joinToString(" · "), color = Palette.accent, fontSize = 15.sp)
+                Column(Modifier.weight(1f).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 detail.tagline?.let { Text(it, color = Palette.dim, fontSize = 16.sp, fontStyle = FontStyle.Italic, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                // In full: this part scrolls, so nothing needs cutting short.
                 detail.description?.let {
-                    Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, maxLines = 6, overflow = TextOverflow.Ellipsis)
+                    Text(it, color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp)
                 }
                 Spacer(Modifier.height(2.dp))
                 detail.director?.let { Credit("Director", it) }
@@ -118,7 +142,17 @@ fun PlexDetailScreen(detail: PlexDetail, onPlay: (fromStart: Boolean) -> Unit) {
                 detail.studio?.let { Credit("Studio", it) }
                 val quality = listOfNotNull(detail.video, detail.audio, detail.subtitles.takeIf { it.isNotEmpty() }?.let { "Subtitles: ${it.distinct().joinToString(", ")}" })
                 if (quality.isNotEmpty()) Credit("File", quality.joinToString("  ·  "))
-                Spacer(Modifier.weight(1f))
+                }
+                if (scroll.maxValue > 0) {
+                    Text(
+                        when {
+                            scroll.value == 0 -> "↓ more"
+                            scroll.value >= scroll.maxValue -> "↑ back up"
+                            else -> "↑↓ scroll"
+                        },
+                        color = Palette.dim, fontSize = 13.sp,
+                    )
+                }
                 val duration = detail.durationMs
                 val resume = detail.resumeSeconds
                 if (resume != null && duration != null) {

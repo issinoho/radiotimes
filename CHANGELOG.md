@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **Long Plex descriptions scroll**: on a film or episode's details
+  page and in the playback ☰ panel, the whole synopsis is shown and
+  ↑/↓ scroll it (with credits and file details) when it doesn't fit; a
+  "↓ more" hint says when there's more.
+- **Setup leads with codes**: the wizard's tvtimes step leads with
+  **Pair with tvtimes** and the Plex step with **Link Plex account**
+  (plex.tv/link); the phone page and typed links are under **Other
+  ways to connect**, which can now also take typed plex:// links.
+- **Fixed: "Unknown Plex server" after Android restarted radiotimes**
+  (after a crash, or a low-memory kill in the background) straight into
+  a Plex screen: the servers and the tvtimes link are now set up when
+  the app process starts, not only on the channel list.
+
 - **Settings → Check for updates**: asks GitHub at once and, when a
   newer radiotimes is out, **Update to X** downloads it and opens Fire
   OS's installer, so updating no longer needs Downloader. The first time,
