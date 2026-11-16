@@ -30,6 +30,8 @@ class MainActivity : ComponentActivity() {
     private enum class Screen { Wizard, Setup, Channels }
 
     private val screen = mutableStateOf(Screen.Channels)
+    /** Bumped on every Plex link change (plex.tv/link, phone, adb, Advanced) so Settings re-reads them. */
+    private val plexVersion = mutableStateOf(0)
     private var focusedChannel: Pair<Channel, List<Channel>>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,11 +83,9 @@ class MainActivity : ComponentActivity() {
                             BackHandler(enabled = canCancel) { screen.value = Screen.Channels }
                             // The phone setup page lives exactly as long as this screen.
                             var phoneUrl by remember { mutableStateOf<String?>(null) }
-                            var plexVersion by remember { mutableStateOf(0) }
                             DisposableEffect(Unit) {
                                 val server = SetupServer { tvtimes, plex ->
                                     if (plex.isNotEmpty()) setPlex(plex)
-                                    plexVersion++
                                     when {
                                         tvtimes != null -> connect(tvtimes)
                                         Prefs.tvtimesUrl(this@MainActivity) != null -> screen.value = Screen.Channels
@@ -94,9 +94,13 @@ class MainActivity : ComponentActivity() {
                                 phoneUrl = server.start()
                                 onDispose { server.stop() }
                             }
+                            val lineup by Tv.lineup.collectAsState()
+                            val plexServers by Plex.servers.collectAsState()
                             SetupScreen(
                                 initial = Prefs.tvtimesUrl(this).orEmpty(),
-                                initialPlex = remember(plexVersion) { Prefs.plexLinks(this).joinToString(" ") },
+                                lineup = lineup,
+                                plexServers = plexServers,
+                                initialPlex = remember(plexVersion.value) { Prefs.plexLinks(this).joinToString(" ") },
                                 canCancel = canCancel,
                                 phoneUrl = phoneUrl,
                                 onPlexLinked = { setPlex(it) },
@@ -162,6 +166,7 @@ class MainActivity : ComponentActivity() {
 
     private fun setPlex(links: List<String>) {
         Prefs.setPlexLinks(this, links)
+        plexVersion.value++
         Plex.configure(links, filesDir.absolutePath)
     }
 

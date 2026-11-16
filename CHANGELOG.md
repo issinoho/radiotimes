@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Settings says plainly what's connected**: a tvtimes section ("✓
+  Connected · 553 channels · your-host", or "✗ Not connected") with
+  **Pair with tvtimes** / **Pair again**, and a Plex section ("✓
+  Connected · SmithPlex, docker-nuc", or "✗ Not connected") with **Link
+  Plex account** / **Link again**; focus starts on whichever still needs
+  connecting. The raw links and the phone page moved under
+  **Advanced**, for when pairing or plex.tv/link can't be used. No token
+  is shown anywhere, only the tvtimes host.
+- Back during pairing (searching, typing an address, a code showing)
+  returns to the first button instead of leaving the screen.
+
 ## 0.7.1
 
 - **Long Plex descriptions scroll**: on a film or episode's details

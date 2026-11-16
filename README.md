@@ -90,7 +90,7 @@ TV; the tvtimes pairing above would avoid the LAN path entirely, and does once t
 | Channel list | ↑ ↓ ← → | move between groups and channels |
 | | OK | play |
 | | ☰ (menu) | play the focused channel with the guide open |
-| | Settings (foot of the groups) | change the tvtimes link |
+| | Settings (foot of the groups) | see whether tvtimes and Plex are connected; pair again, link Plex, check for updates (links themselves under Advanced) |
 | Player | ↑ / ↓, CH+ / CH− | next / previous channel in the group |
 | | OK | show or hide what's on |
 | | ◀ | back to the previous channel |

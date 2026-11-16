@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -46,12 +47,11 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
 /**
- * Links, entered once. Three ways in, easiest first: scan the QR code and
- * paste on a phone ([SetupServer]); "Link Plex account" (plex.tv/link,
- * no tokens at all); or type with the remote. Focus starts on "Connect"
- * when a link is filled in, else on "Link Plex account" -- never a text
- * field, which opens the keyboard on focus on Android TV, and on Fire TV
- * opens a full-screen one that Back doesn't always dismiss.
+ * Settings: is tvtimes connected, is Plex connected -- said plainly, with
+ * the code-based way to (re)connect each (tvtimes pairing, plex.tv/link).
+ * The raw links and the phone page are under **Advanced**, a fallback for
+ * experts; tokens are never shown (only a tvtimes host). Focus starts on a
+ * button, never a text field (Fire TV's keyboard).
  */
 @Composable
 fun SetupScreen(
@@ -59,27 +59,129 @@ fun SetupScreen(
     initialPlex: String,
     canCancel: Boolean,
     phoneUrl: String?,
+    lineup: Tv.Lineup,
+    plexServers: List<PlexServer>,
     onConnect: (url: String, plex: String) -> Unit,
     onPlexLinked: (List<String>) -> Unit,
     onCancel: () -> Unit,
 ) {
+    var advanced by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = advanced) { advanced = false }
+    if (advanced) {
+        AdvancedLinks(initial, initialPlex, phoneUrl, onConnect, onPlexLinked, onDone = { advanced = false })
+        return
+    }
+    var pairing by remember { mutableStateOf(false) }
+    var plexBusy by remember { mutableStateOf(false) }
+    val hasTvtimes = initial.isNotBlank()
+    val hasPlex = initialPlex.isNotBlank()
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 28.dp).widthIn(max = 760.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text("Settings", color = Palette.text, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+
+        if (!plexBusy) Section("tvtimes") {
+            val (status, ok) = when {
+                !hasTvtimes -> "Not connected" to false
+                lineup is Tv.Lineup.Ready -> "Connected  ·  ${lineup.channels.size} channels  ·  ${hostOf(initial)}" to true
+                lineup is Tv.Lineup.Failed -> "Can't connect to ${hostOf(initial)}: ${redactTokens(lineup.message)}" to false
+                else -> "Connecting to ${hostOf(initial)}…" to null
+            }
+            StatusLine(status, ok)
+            PairWithTvtimes(
+                focusFirst = !hasTvtimes || hasPlex,
+                onLinked = { link -> onConnect(link, initialPlex) },
+                onBusy = { pairing = it },
+                label = if (hasTvtimes) "Pair again" else "Pair with tvtimes",
+            )
+        }
+
+        if (!pairing) Section("Plex") {
+            val usable = plexServers.filter { it.error == null }
+            val broken = plexServers.filter { it.error != null }
+            val (status, ok) = when {
+                !hasPlex -> "Not connected" to false
+                usable.isNotEmpty() -> ("Connected  ·  ${usable.joinToString(", ") { it.name }}" +
+                    if (broken.isNotEmpty()) "  ·  ${broken.size} not reachable" else "") to true
+                broken.isNotEmpty() -> "Can't reach the Plex server${if (broken.size > 1) "s" else ""}" to false
+                else -> "Connecting…" to null
+            }
+            StatusLine(status, ok)
+            PlexLink(
+                focusFirst = hasTvtimes && !hasPlex,
+                showTitle = false,
+                label = if (hasPlex) "Link Plex account again" else "Link Plex account",
+                onBusy = { plexBusy = it },
+                onLinked = onPlexLinked,
+            )
+        }
+
+        if (!pairing && !plexBusy) {
+            UpdateCheck()
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (canCancel) Button(onClick = onCancel, modifier = Modifier.focusRing()) { Text("Back to channels") }
+                OutlinedButton(onClick = { advanced = true }, modifier = Modifier.focusRing()) { Text("Advanced") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Section(title: String, content: @Composable () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.surface).padding(horizontal = 22.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(title, color = Palette.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        content()
+    }
+}
+
+/** ✓ connected (accent), ✗ needs connecting (warn), or in progress (dim). */
+@Composable
+private fun StatusLine(text: String, ok: Boolean?) {
+    val (mark, color) = when (ok) {
+        true -> "✓  " to Palette.accent
+        false -> "✗  " to Palette.warn
+        null -> "" to Palette.dim
+    }
+    Text(mark + text, color = color, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+}
+
+/** The host (and port) of a tvtimes link: never its token. */
+private fun hostOf(link: String): String = runCatching {
+    val u = java.net.URI(link.trim())
+    "${u.host}${if (u.port > 0) ":${u.port}" else ""}"
+}.getOrDefault("tvtimes")
+
+/**
+ * Advanced: the raw tvtimes link and Plex links (tokens masked), and the
+ * phone page that can send them. For when pairing / plex.tv/link can't be
+ * used -- an older tvtimes, a Plex server not on an account.
+ */
+@Composable
+private fun AdvancedLinks(
+    initial: String,
+    initialPlex: String,
+    phoneUrl: String?,
+    onConnect: (url: String, plex: String) -> Unit,
+    onPlexLinked: (List<String>) -> Unit,
+    onDone: () -> Unit,
+) {
     var url by remember { mutableStateOf(initial) }
     var plex by remember(initialPlex) { mutableStateOf(initialPlex) }
     val valid = url.trim().let { it.startsWith("tvtimes://") || it.startsWith("tvtimess://") } && "token=" in url
-    val field = remember { FocusRequester() }
-    val connect = remember { FocusRequester() }
-
+    val back = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { back.requestFocus() } }
     Row(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 28.dp), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("radiotimes", color = Palette.text, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text("Advanced", color = Palette.text, fontSize = 32.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Pair with tvtimes, or send your tvtimes link (Settings → Export feeds) from your phone " +
-                    "with the code on the right.",
-                color = Palette.dim, fontSize = 16.sp,
+                "The links themselves, for when pairing or plex.tv/link can't be used. The tvtimes link is under " +
+                    "tvtimes → Settings → Export feeds; send it from your phone with the code on the right, or type it.",
+                color = Palette.dim, fontSize = 16.sp, lineHeight = 23.sp,
             )
-            var pairing by remember { mutableStateOf(false) }
-            PairWithTvtimes(focusFirst = !valid, onLinked = { link -> onConnect(link, plex) }, onBusy = { pairing = it })
-            if (!pairing) {
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
@@ -88,33 +190,27 @@ fun SetupScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (valid) onConnect(url.trim(), plex) }),
                 visualTransformation = MaskToken,
-                modifier = Modifier.fillMaxWidth().focusRequester(field),
+                modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = plex,
                 onValueChange = { plex = it },
-                label = { Text("Plex servers (optional)") },
+                label = { Text("Plex servers (plex:// links, optional)") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                 visualTransformation = MaskToken,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Button(onClick = { onConnect(url.trim(), plex) }, enabled = valid, modifier = Modifier.focusRequester(connect).focusRing()) {
-                    Text("Connect")
-                }
-                if (canCancel) OutlinedButton(onClick = onCancel, modifier = Modifier.focusRing()) { Text("Cancel") }
-            }
-            // (Sending links from a computer with adb is in the README; the
-            // line that described it here ran off the bottom of the screen.)
-            UpdateCheck()
+                Button(onClick = { onConnect(url.trim(), plex) }, enabled = valid, modifier = Modifier.focusRing()) { Text("Save and connect") }
+                OutlinedButton(onClick = onDone, modifier = Modifier.focusRequester(back).focusRing()) { Text("Back") }
             }
         }
         Column(
             Modifier.width(330.dp).clip(RoundedCornerShape(14.dp)).background(Palette.surface).padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Set up from your phone", color = Palette.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            Text("Send from your phone", color = Palette.text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
             if (phoneUrl != null) {
                 QrCode(phoneUrl, Modifier.size(170.dp).align(Alignment.CenterHorizontally))
                 Text("Scan, or open on a phone on the same Wi-Fi:", color = Palette.dim, fontSize = 13.sp)
@@ -122,18 +218,7 @@ fun SetupScreen(
             } else {
                 Text("Not available: the TV has no home-network address.", color = Palette.dim, fontSize = 14.sp)
             }
-            Spacer(Modifier.height(6.dp))
-            PlexLink(focusFirst = false, onLinked = { links ->
-                plex = links.joinToString(" ")
-                onPlexLinked(links)
-            })
         }
-    }
-
-    // Never a text field: on some devices focusing one opens the keyboard
-    // straight away (Android TV does; Fire TV's can trap the remote).
-    LaunchedEffect(Unit) {
-        if (valid) runCatching { connect.requestFocus() }
     }
 }
 
@@ -199,16 +284,24 @@ private fun UpdateCheck() {
 
 /** plex.tv/link: show Plex's 4-character code, wait for it to be entered, collect every server. */
 @Composable
-internal fun PlexLink(focusFirst: Boolean, showTitle: Boolean = true, onLinked: (List<String>) -> Unit) {
+internal fun PlexLink(
+    focusFirst: Boolean,
+    showTitle: Boolean = true,
+    label: String = "Link Plex account",
+    onBusy: (Boolean) -> Unit = {},
+    onLinked: (List<String>) -> Unit,
+) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (focusFirst) runCatching { first.requestFocus() } }
     var code by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     var attempt by remember { mutableStateOf(0) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    // While a code is up the caller can make room (Settings hides the rest).
+    LaunchedEffect(code) { onBusy(code != null) }
     if (showTitle) Text("Plex", color = Palette.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     if (code == null) {
-        OutlinedButton(onClick = { attempt++ }, modifier = Modifier.focusRequester(first).focusRing()) { Text("Link Plex account") }
+        OutlinedButton(onClick = { attempt++ }, modifier = Modifier.focusRequester(first).focusRing()) { Text(label) }
     } else {
         Text("Go to plex.tv/link and enter", color = Palette.dim, fontSize = 14.sp)
         Text(code!!, color = Palette.accent, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = 6.sp)

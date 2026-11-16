@@ -49,10 +49,18 @@ private sealed interface PairState {
  * Focus starts on a button, never the address field (Fire TV's keyboard).
  */
 @Composable
-fun PairWithTvtimes(focusFirst: Boolean, onLinked: (String) -> Unit, onBusy: (Boolean) -> Unit = {}) {
+fun PairWithTvtimes(
+    focusFirst: Boolean,
+    onLinked: (String) -> Unit,
+    onBusy: (Boolean) -> Unit = {},
+    label: String = "Pair with tvtimes",
+) {
     var state by remember { mutableStateOf<PairState>(PairState.Idle) }
     // Past the first button, the pairing needs the room: callers hide their alternatives.
     LaunchedEffect(state) { onBusy(state != PairState.Idle) }
+    // Back steps out of pairing (search results, address, code) to the
+    // first button, rather than leaving the screen.
+    androidx.activity.compose.BackHandler(enabled = state != PairState.Idle) { state = PairState.Idle }
     var typed by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val first = remember { FocusRequester() }
@@ -91,7 +99,7 @@ fun PairWithTvtimes(focusFirst: Boolean, onLinked: (String) -> Unit, onBusy: (Bo
 
     when (val s = state) {
         PairState.Idle -> {
-            Button(onClick = { search() }, modifier = Modifier.focusRequester(first).focusRing()) { Text("Pair with tvtimes") }
+            Button(onClick = { search() }, modifier = Modifier.focusRequester(first).focusRing()) { Text(label) }
             LaunchedEffect(Unit) { if (focusFirst) runCatching { first.requestFocus() } }
         }
         PairState.Searching -> Text("Looking for tvtimes on your network…", color = Palette.text, fontSize = 17.sp)
