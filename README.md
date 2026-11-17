@@ -30,6 +30,7 @@ so everything is legal to watch. Each later step is optional.
 | [4. radiotimes](#4-optional-watch-on-a-fire-tv-with-radiotimes) *(optional)* | the same line-up on the TV | a Fire TV running Fire OS 7 or 8 |
 | [5. FastChannels](#5-optional-add-pluto-tv-with-fastchannels) *(optional)* | Pluto TV's free ad-supported channels | step 1 |
 | [6. HDHomeRun](#6-optional-add-an-hdhomerun-tuner) *(optional)* | your own aerial (DVB) channels | an HDHomeRun on the LAN |
+| [7. Plex](#7-optional-add-your-plex-library) *(optional)* | your films and series alongside live TV | a Plex Media Server |
 
 ```mermaid
 flowchart LR
@@ -55,14 +56,18 @@ flowchart LR
     TT -->|"one playlist + guide<br/>(paired token)"| RT
     TVD -.->|what you watched| TT
     RT -.->|what you watched| TT
+
+    PLEX["Plex Media Server<br/><i>films and series</i>"]
+    PLEX <-->|"library + video<br/>(direct, not via tvtimes)"| PLAY
     PLAY ==>|"video, via a redirect<br/>from tvtimes"| SRC
 ```
 
 Solid arrows are the line-up and guide, refreshed on a schedule; dotted
 ones are watch history reported back. Video never passes through
 tvtimes: a player asks tvtimes for a channel and is redirected straight
-to the stream (the broadcaster, FastChannels or the tuner). Steps 4 to 6
-are optional.
+to the stream (the broadcaster, FastChannels or the tuner). Plex sits
+outside tvtimes altogether: each player talks to it directly, and
+reports progress back to it. Steps 4 to 7 are optional.
 
 The examples use `192.168.1.10` for the Docker host. Use your own.
 
@@ -200,8 +205,8 @@ or newer for pairing.
 <!-- screenshot: docs/quickstart/07-tvtimes-devices.png — Settings → Devices, approve -->
 <!-- screenshot: docs/quickstart/08-radiotimes-channels.png — channel list -->
 
-Plex is optional at the next step of the wizard; skip it if you don't
-use Plex.
+The wizard's next step is Plex: skip it for now, or see
+[step 7](#7-optional-add-your-plex-library).
 
 ### 5. (Optional) Add Pluto TV with FastChannels
 
@@ -313,11 +318,51 @@ More detail: [tvtimes and HDHomeRun](https://issinoho.github.io/tvtimes/hdhomeru
 
 <!-- screenshot: docs/quickstart/12-add-hdhomerun.png — Add source, HDHomeRun -->
 
+### 7. (Optional) Add your Plex library
+
+Plex isn't a tvtimes source: films and series come straight from your
+Plex Media Server to each player, which browses the library, plays
+from it, and reports progress back to Plex (so Resume works across
+Plex's own apps too).
+
+**In tvdinner**, a Plex server is a URL carrying your Plex token:
+
+```sh
+tvdinner 'plex://192.168.1.20:32400?X-Plex-Token=YOUR_PLEX_TOKEN'
+```
+
+To find the token, open any item in Plex Web, choose **Get Info → View
+XML**, and copy the `X-Plex-Token=` value from the address bar
+([Plex's instructions](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)).
+Use `plexs://` if the server is only reachable over https. Save it as
+a bookmark just as in [step 3](#3-watch-on-the-desktop-with-tvdinner),
+and it sits alongside tvtimes in the picker:
+
+```sh
+tvdinner bookmarks add --name Plex \
+  --url 'plex://192.168.1.20:32400?X-Plex-Token=YOUR_PLEX_TOKEN'
+```
+
+Like the tvtimes token, the Plex token is a password for your whole
+library: it is stored as plain text in the bookmark file, and masked in
+tvdinner's log.
+
+**In radiotimes**, no token is needed. At the wizard's Plex step (or
+later from **Settings → Link Plex account**), the TV shows a code;
+open [plex.tv/link](https://plex.tv/link) on a phone or computer, sign
+in, and enter it. Every server on that Plex account appears as its own
+entry in the channel list's group rail, with On Deck, search and each
+library.
+
+<!-- screenshot: docs/quickstart/13-radiotimes-plex-code.png — the plex.tv/link code on the TV -->
+<!-- screenshot: docs/quickstart/14-radiotimes-plex-library.png — a Plex library in radiotimes -->
+
 <!-- Screenshots to capture (docs/quickstart/, tokens and addresses blurred):
      01 tvtimes sign-up · 02 Add M3U source · 03 tvtimes guide ·
      04 Export feeds · 04b tvdinner bookmarks · 05 tvdinner guide · 06 radiotimes pairing code ·
      07 tvtimes Devices · 08 radiotimes channel list · 09 FastChannels Pluto source ·
-     10 FastChannels pluto feed · 11 Pluto in tvtimes guide · 12 Add HDHomeRun -->
+     10 FastChannels pluto feed · 11 Pluto in tvtimes guide · 12 Add HDHomeRun ·
+     13 radiotimes Plex code · 14 radiotimes Plex library -->
 
 ## What it does
 
