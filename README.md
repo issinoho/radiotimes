@@ -157,6 +157,28 @@ In tvtimes, turn the feeds on under **Settings → Export feeds** and press
 tvdinner 'tvtimes://192.168.1.10:8888?token=YOUR_TOKEN'
 ```
 
+(This setup serves tvtimes over plain http, hence `tvtimes://`. Behind
+an HTTPS reverse proxy the link starts `tvtimess://` instead.)
+
+To keep the link rather than typing it each time, save it as a
+bookmark. Run `tvdinner` with nothing after it to open the bookmarks
+picker, press `a`, and fill in a name (say `tvtimes`), the link as the
+URL, and optionally a device name, which is how this machine appears in
+tvtimes' watch history. Or add it in one line:
+
+```sh
+tvdinner bookmarks add --name tvtimes \
+  --url 'tvtimes://192.168.1.10:8888?token=YOUR_TOKEN' \
+  --device-name 'Living room PC'
+```
+
+From then on `tvdinner` opens the picker, and `ENTER` on the row plays
+your line-up. A tvtimes bookmark's **tvtimes** box starts ticked, so
+tvdinner also reports what you watch, syncs your favourites and records
+from your watchlist; `t` turns that off for one launch.
+
+<!-- screenshot: docs/quickstart/04b-tvdinner-bookmarks.png — the bookmarks picker with the tvtimes row (token hidden) -->
+
 <!-- screenshot: docs/quickstart/04-export-feeds.png — Settings → Export feeds (token blurred) -->
 ![tvdinner's programme guide](docs/quickstart/05-tvdinner-guide.png)
 
@@ -293,7 +315,7 @@ More detail: [tvtimes and HDHomeRun](https://issinoho.github.io/tvtimes/hdhomeru
 
 <!-- Screenshots to capture (docs/quickstart/, tokens and addresses blurred):
      01 tvtimes sign-up · 02 Add M3U source · 03 tvtimes guide ·
-     04 Export feeds · 05 tvdinner guide · 06 radiotimes pairing code ·
+     04 Export feeds · 04b tvdinner bookmarks · 05 tvdinner guide · 06 radiotimes pairing code ·
      07 tvtimes Devices · 08 radiotimes channel list · 09 FastChannels Pluto source ·
      10 FastChannels pluto feed · 11 Pluto in tvtimes guide · 12 Add HDHomeRun -->
 
