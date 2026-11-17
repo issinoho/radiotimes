@@ -11,6 +11,292 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
   XMLTV parsing and caching, now/next, and the tvtimes feeds.
 - **The app** adds a 10-foot interface and plays streams with Media3/ExoPlayer.
 
+## Quick Start
+
+<!-- FRAMEWORK DRAFT: headings, flow and known-good commands are in place;
+     TODO markers flag what still needs confirming. Screenshots go in
+     docs/quickstart/ (01, 05, 09 and 10 captured; the rest are listed at the end). -->
+
+This walks through building the whole stack from nothing on one Linux
+machine running Docker with the Compose plugin. The core path uses
+free-to-air UK channels from [Free-TV](https://github.com/Free-TV/IPTV),
+so everything is legal to watch. Each later step is optional.
+
+| Step | What you get | Needs |
+|---|---|---|
+| [1. tvtimes](#1-run-tvtimes) | your guide server: one line-up, one XMLTV guide | Docker + Compose on Linux |
+| [2. Add Free-TV channels](#2-add-free-tv-channels) | legal free-to-air channels with a guide | step 1 |
+| [3. tvdinner](#3-watch-on-the-desktop-with-tvdinner) | a desktop player for that line-up | a Linux desktop |
+| [4. radiotimes](#4-optional-watch-on-a-fire-tv-with-radiotimes) *(optional)* | the same line-up on the TV | a Fire TV running Fire OS 7 or 8 |
+| [5. FastChannels](#5-optional-add-pluto-tv-with-fastchannels) *(optional)* | Pluto TV's free ad-supported channels | step 1 |
+| [6. HDHomeRun](#6-optional-add-an-hdhomerun-tuner) *(optional)* | your own aerial (DVB) channels | an HDHomeRun on the LAN |
+
+```mermaid
+flowchart LR
+    subgraph SRC["Sources"]
+        FTV["Free-TV<br/><i>M3U on GitHub</i>"]
+        EPG["iptv-epg.org<br/><i>XMLTV guide</i>"]
+        FAST["FastChannels<br/><i>Docker · Pluto TV</i>"]
+        HDHR["HDHomeRun<br/><i>DVB tuner on the LAN</i>"]
+    end
+
+    TT["tvtimes<br/><i>Docker: merges channels<br/>and guides</i>"]
+
+    subgraph PLAY["Players"]
+        TVD["tvdinner<br/><i>desktop</i>"]
+        RT["radiotimes<br/><i>Fire TV</i>"]
+    end
+
+    FTV -->|channel list| TT
+    EPG -->|guide| TT
+    FAST -->|playlist + guide| TT
+    HDHR -->|line-up + guide| TT
+    TT -->|"one playlist + guide<br/>(export token)"| TVD
+    TT -->|"one playlist + guide<br/>(paired token)"| RT
+    TVD -.->|what you watched| TT
+    RT -.->|what you watched| TT
+    PLAY ==>|"video, via a redirect<br/>from tvtimes"| SRC
+```
+
+Solid arrows are the line-up and guide, refreshed on a schedule; dotted
+ones are watch history reported back. Video never passes through
+tvtimes: a player asks tvtimes for a channel and is redirected straight
+to the stream (the broadcaster, FastChannels or the tuner). Steps 4 to 6
+are optional.
+
+The examples use `192.168.1.10` for the Docker host. Use your own.
+
+### 1. Run tvtimes
+
+```sh
+mkdir ~/tvtimes && cd ~/tvtimes
+curl -O https://raw.githubusercontent.com/issinoho/tvtimes/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/issinoho/tvtimes/main/.env.example
+```
+
+Edit `.env`. On a LAN these three lines are all you need:
+
+```sh
+TVTIMES_PUBLIC_ORIGIN=http://192.168.1.10:8888   # exactly what the browser will show
+TVTIMES_WEBAUTHN_RP_ID=localhost                  # keep for a bare-IP setup
+POSTGRES_PASSWORD=...                             # e.g. the output of: openssl rand -hex 24
+```
+
+```sh
+docker compose up -d
+docker compose logs -f tvtimes     # the email verification link is printed here
+```
+
+Open `http://192.168.1.10:8888`, create your account, and click the
+verification link from the log.
+
+![tvtimes' sign-up page](docs/quickstart/01-tvtimes-signup.png)
+
+For HTTPS behind a reverse proxy, email, and backups, see the
+[tvtimes self-hosting guide](https://github.com/issinoho/tvtimes/blob/main/docs/homelab.md).
+
+### 2. Add Free-TV channels
+
+Free-TV lists only channels that are free to watch, with official
+streams. In tvtimes: **Sources → Add source → M3U**, and paste the UK
+playlist:
+
+```
+https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_uk.m3u8
+```
+
+The playlist's header points at about a hundred worldwide guide files
+at once, which neither tvtimes nor tvdinner reads as a guide. Attach
+the UK one instead: open the new source's **EPG** panel and paste this
+into **Attach XMLTV**:
+
+```
+https://iptv-epg.org/files/epg-gb.xml
+```
+
+Other countries follow the same pattern: `playlist_<country>.m3u8` in
+[Free-TV's playlists](https://github.com/Free-TV/IPTV/tree/master/playlists),
+`epg-<country code>.xml` on [iptv-epg.org](https://iptv-epg.org/).
+
+<!-- TODO: id match checked 2026-11-17: 26 of the playlist's 55 tvg-ids are
+     in epg-gb.xml. Most misses are BBC radio; others differ in name
+     (BBCNews.uk vs BBCNewsChannel.uk, ITV1.uk vs regional ITV1 ids).
+     Decide whether to say so, or whether tvtimes' name matching covers them
+     (see the guide after the first refresh). -->
+
+<!-- screenshot: docs/quickstart/02-add-m3u-source.png — Add source, M3U -->
+<!-- screenshot: docs/quickstart/03-tvtimes-guide.png — guide grid filled in -->
+
+Optionally, add a free [TMDB API key](https://www.themoviedb.org/settings/api)
+under Settings for film artwork, cast and ratings.
+
+### 3. Watch on the desktop with tvdinner
+
+On Ubuntu 24.04 or newer:
+
+```sh
+sudo add-apt-repository ppa:issinoho/tvdinner
+sudo apt install tvdinner
+```
+
+(Other distributions and Windows: see
+[tvdinner's install section](https://github.com/issinoho/tvdinner#install).)
+
+tvdinner can also play the Free-TV channels on its own, which is a
+quick way to check the streams work before tvtimes is involved:
+
+```sh
+tvdinner https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_uk.m3u8 \
+  --epg https://iptv-epg.org/files/epg-gb.xml
+```
+
+In tvtimes, turn the feeds on under **Settings → Export feeds** and press
+**Open in tvdinner**, or copy the link it shows and run:
+
+```sh
+tvdinner 'tvtimes://192.168.1.10:8888?token=YOUR_TOKEN'
+```
+
+<!-- screenshot: docs/quickstart/04-export-feeds.png — Settings → Export feeds (token blurred) -->
+![tvdinner's programme guide](docs/quickstart/05-tvdinner-guide.png)
+
+Treat the token like a password: it gives access to the whole line-up.
+You can rotate it from the same panel.
+
+### 4. (Optional) Watch on a Fire TV with radiotimes
+
+Needs a Fire TV running Fire OS 7 or 8 (not Vega OS), and tvtimes 1.4.0
+or newer for pairing.
+
+1. Install radiotimes with the Downloader code **8716486** (full steps:
+   [Install on a Fire TV Stick](#install-on-a-fire-tv-stick)).
+2. Open it and choose **Pair with tvtimes**. It finds tvtimes on your
+   network (or type `192.168.1.10:8888`) and shows a code.
+3. In tvtimes, go to **Settings → Devices** and enter the code.
+
+<!-- screenshot: docs/quickstart/06-radiotimes-pair.png — pairing code on the TV -->
+<!-- screenshot: docs/quickstart/07-tvtimes-devices.png — Settings → Devices, approve -->
+<!-- screenshot: docs/quickstart/08-radiotimes-channels.png — channel list -->
+
+Plex is optional at the next step of the wizard; skip it if you don't
+use Plex.
+
+### 5. (Optional) Add Pluto TV with FastChannels
+
+[FastChannels](https://github.com/kineticman/FastChannels) collects free
+ad-supported (FAST) services such as Pluto TV and serves them as an M3U
+playlist with an XMLTV guide. Run it as its own stack next to tvtimes:
+
+```sh
+mkdir ~/fastchannels && cd ~/fastchannels
+cat > docker-compose.yml <<'YAML'
+services:
+  fastchannels:
+    image: ghcr.io/kineticman/fastchannels:latest
+    container_name: fastchannels
+    ports:
+      - 5523:5523
+    volumes:
+      - db_data:/data
+      - adb_keys:/root/.android
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  adb_keys:
+YAML
+docker compose up -d
+```
+
+Then open `http://192.168.1.10:5523/admin/`:
+
+1. **Settings → FastChannels Server URL**: set `http://192.168.1.10:5523`.
+   Stream links in the playlist use this address, so it must be one the
+   Fire TV and desktop can reach, not `localhost`.
+2. **Sources → Pluto TV**: switch it on (it ships off; no account is
+   needed) and leave its region at the default, *United States (East)*.
+   Let it scrape: channel counts climb on the dashboard over a few
+   minutes.
+3. **Sources → Pluto TV → Stream Audit**: this marks dead and
+   DRM-protected channels and leaves them out of the feeds. Neither
+   tvdinner nor radiotimes can play DRM channels.
+4. **Feeds → New feed**: name it `Pluto US`, with **Sources: Pluto TV**
+   and **Languages: en**. Its address uses the name: `/feeds/pluto-us/`.
+
+Outside the US, Pluto may show its error slate instead of ad breaks. If
+it does, open the Pluto TV source card and turn on **Route playlists
+through FastChannels**, which fetches each playlist for the channel's
+own region.
+
+FastChannels also turns on several other free sources (The Roku
+Channel, Samsung TV Plus, Plex, Xumo and more) out of the box. Leave
+them: the `pluto-us` feed carries only Pluto TV, so that is all tvtimes
+sees. Another feed can bring the others in later.
+
+![FastChannels' Sources page with Pluto TV switched on](docs/quickstart/09-fastchannels-pluto.png)
+
+![The Pluto US feed in FastChannels](docs/quickstart/10-fastchannels-feed.png)
+
+tvtimes blocks fetches from LAN addresses by default, so first allow
+the FastChannels host. In tvtimes' `.env`:
+
+```sh
+TVTIMES_FETCH_ALLOWLIST=192.168.1.10
+```
+
+```sh
+cd ~/tvtimes && docker compose up -d --force-recreate
+```
+
+Then add it in tvtimes as **Sources → Add source → M3U** with the
+feed's *native* playlist (on the feed's card, under **Native
+(scraped-only) endpoints**):
+
+```
+http://192.168.1.10:5523/feeds/pluto-us/native/m3u
+```
+
+The native playlist names its own guide in its header
+(`/feeds/pluto-us/native/epg.xml`), so tvtimes picks up the guide without
+anything attached.
+
+<!-- screenshot: docs/quickstart/11-pluto-in-guide.png — Pluto channels in the tvtimes guide -->
+
+Pluto's ad breaks can freeze a stream; tvdinner and radiotimes both
+reconnect by themselves.
+
+### 6. (Optional) Add an HDHomeRun tuner
+
+This assumes the tuner is already set up and has scanned for channels
+(in SiliconDust's own HDHomeRun app).
+
+In tvtimes: **Sources → Add source → HDHomeRun**. tvtimes runs in
+Docker's bridge network, which doesn't receive the tuner's discovery
+broadcasts, so enter the tuner's LAN address instead of leaving it
+blank:
+
+```
+http://192.168.1.50
+```
+
+tvtimes reads the tuner's channel list and adopts SiliconDust's guide
+for those channels automatically, with nothing to attach; for DVB
+channels that guide is free.
+
+The tuner's channels then flow through the same export link to tvdinner
+and radiotimes. If the tuner is on a different network from the
+server, use the
+[tvtimes connector](https://github.com/issinoho/tvtimes/blob/main/connector/README.md).
+More detail: [tvtimes and HDHomeRun](https://issinoho.github.io/tvtimes/hdhomerun/).
+
+<!-- screenshot: docs/quickstart/12-add-hdhomerun.png — Add source, HDHomeRun -->
+
+<!-- Screenshots to capture (docs/quickstart/, tokens and addresses blurred):
+     01 tvtimes sign-up · 02 Add M3U source · 03 tvtimes guide ·
+     04 Export feeds · 05 tvdinner guide · 06 radiotimes pairing code ·
+     07 tvtimes Devices · 08 radiotimes channel list · 09 FastChannels Pluto source ·
+     10 FastChannels pluto feed · 11 Pluto in tvtimes guide · 12 Add HDHomeRun -->
+
 ## What it does
 
 - **Setup:** a first-run wizard (Welcome → tvtimes → Plex → Ready).
