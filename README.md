@@ -13,9 +13,9 @@ server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
 
 ## Quick Start
 
-<!-- FRAMEWORK DRAFT: headings, flow and known-good commands are in place;
-     TODO markers flag what still needs confirming. Screenshots go in
-     docs/quickstart/ (01, 05, 09 and 10 captured; the rest are listed at the end). -->
+<!-- Screenshots live in docs/quickstart/ (01, 05, 09 and 10 so far); the
+     rest are listed at the end of this section. Use placeholder addresses
+     (192.168.1.x) and hide tokens in any new ones. -->
 
 This walks through building the whole stack from nothing on one Linux
 machine running Docker with the Compose plugin. The core path uses
