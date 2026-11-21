@@ -445,16 +445,16 @@ TV; the tvtimes pairing above would avoid the LAN path entirely, and does once t
 | | ☰ (menu) | play the focused channel with the guide open |
 | | Settings (foot of the groups) | see whether tvtimes and Plex are connected; pair again, link Plex, check for updates (links themselves under Advanced) |
 | Player | ↑ / ↓, CH+ / CH− | next / previous channel in the group |
-| | OK | show or hide what's on |
+| | OK | show what's on; OK again (its **More** button) opens the full details below |
 | | ◀ | back to the previous channel |
-| | ☰ / Info | full details of what's on (whole description, later on this channel), with Guide, picture size and subtitles on/off |
-| | ☰ then OK | guide, with the channel still playing in the corner |
+| | ☰ / Info, or OK OK | full details of what's on (whole description, later on this channel), with Guide, picture size and subtitles on/off |
+| | ☰ then OK, or OK OK OK | guide, with the channel still playing in the corner |
 | | Back | back to the list |
 | Plex | OK | open a list, or a movie/episode's details |
 | | OK on Resume / Play | play |
 | | Back | up a level |
 | Plex player | OK | controls and what's playing (again: pause) — or press the Skip / Next episode button when it shows |
-| | ☰ / Info | full details of what's playing, picture size, subtitles on/off, find subtitles online |
+| | ☰ / Info, or **More** in the controls' bottom row | full details of what's playing, picture size, subtitles on/off, find subtitles online |
 | | ⏯ ⏩ ⏪ | play/pause, forward 30 s, back 10 s |
 | Live TV and Plex | hold OK | picture size: Fit → Zoom → Stretch |
 | | ↑ ↓ ← → | show the seek bar and controls |

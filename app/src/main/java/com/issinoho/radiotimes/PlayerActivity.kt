@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -553,15 +554,18 @@ class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { if (down(event)) zap(+1); true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { if (down(event)) zap(-1); true }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                // Hold OK: next picture size. A tap: the banner.
+                // Hold OK: next picture size. A tap: the banner, or with it
+                // up, its More button (the ☰ panel).
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 1) {
                     okHeld = true
                     cyclePicture()
                 } else if (event.action == KeyEvent.ACTION_UP) {
                     if (okHeld) {
                         okHeld = false
-                    } else if (bannerVisible.value && status.value == Status.Playing) {
-                        bannerVisible.value = false
+                    } else if (bannerVisible.value || status.value is Status.Failed) {
+                        // The banner's More button: the ☰ panel for remotes
+                        // without ☰ (onn / Google TV, some Fire TV ones).
+                        openPanel()
                     } else {
                         showBanner()
                     }
@@ -692,13 +696,23 @@ private fun Banner(channel: Channel, nowNext: NowNext?, statusLine: String?, fai
                     Text("Next ${clockText(next.start)} · ${next.title}", color = Palette.dim, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (statusLine != null) Text(statusLine, color = if (failed) Palette.warn else Palette.dim, fontSize = 15.sp)
-                Text(
-                    listOfNotNull(
-                        previous?.let { "◀  back to ${if (it.number > 0) "${it.number} " else ""}${it.name}" },
-                        "☰  more about this, picture size, guide",
-                    ).joinToString("      "),
-                    color = Palette.dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    // Drawn, not focusable: focus stays with the activity,
+                    // which opens the panel on OK while the banner shows.
+                    Text(
+                        "OK  More · Guide · Picture",
+                        color = Palette.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        modifier = Modifier
+                            .border(1.5.dp, Palette.text, RoundedCornerShape(16.dp))
+                            .padding(horizontal = 14.dp, vertical = 5.dp),
+                    )
+                    previous?.let {
+                        Text(
+                            "◀  back to ${if (it.number > 0) "${it.number} " else ""}${it.name}",
+                            color = Palette.dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }
@@ -805,7 +819,7 @@ private fun LivePanel(
             scroll.value >= scroll.maxValue -> "↑ back up  ·  "
             else -> "↑↓ scroll  ·  "
         }
-        Text("$more☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
+        Text("$moreBack to close", color = Palette.dim, fontSize = 13.sp)
     }
 }
 

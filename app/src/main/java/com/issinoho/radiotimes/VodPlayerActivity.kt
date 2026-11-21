@@ -137,6 +137,7 @@ class VodPlayerActivity : ComponentActivity() {
                                         if (visibility != android.view.View.VISIBLE && info.value == Info.Banner) info.value = Info.None
                                     },
                                 )
+                                addMoreButton(this)
                                 player = this@VodPlayerActivity.player
                                 view = this
                             }
@@ -497,6 +498,45 @@ class VodPlayerActivity : ComponentActivity() {
         }
     }
 
+    /** The ☰ panel: everything about what's playing, with its options. */
+    private fun openFull() {
+        info.value = Info.Full
+        subtitleSearch.value = null
+        view?.hideController()
+        lifecycleScope.launch { panelScroll.scrollTo(0) }
+    }
+
+    /**
+     * A "More" button at the start of the controller's bottom row (beside
+     * CC and settings), so the ☰ panel is reachable on remotes without ☰
+     * (onn / Google TV): OK, ↓ to the row, OK. A real view in Media3's own
+     * controller, so its D-pad focus handles it with no key gating here.
+     */
+    private fun addMoreButton(player: PlayerView) {
+        val row = player.findViewById<android.view.ViewGroup>(androidx.media3.ui.R.id.exo_basic_controls) ?: return
+        val pad = (12 * resources.displayMetrics.density).toInt()
+        val more = android.widget.TextView(this).apply {
+            text = "More"
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 15f
+            gravity = android.view.Gravity.CENTER
+            setPadding(pad, 0, pad, 0)
+            isFocusable = true
+            isClickable = true
+            val bg = android.util.TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, bg, true)
+            setBackgroundResource(bg.resourceId)
+            contentDescription = "More about this"
+            setOnClickListener { openFull() }
+        }
+        row.addView(
+            more, 0,
+            android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+    }
+
     private fun showNotice(text: String, sticky: Boolean = false) {
         notice.value = text
         noticeJob?.cancel()
@@ -532,13 +572,7 @@ class VodPlayerActivity : ComponentActivity() {
         // ☰ / Info: the full details panel, on and off.
         if (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_INFO) {
             if (event.action == KeyEvent.ACTION_UP) {
-                val open = info.value != Info.Full
-                info.value = if (open) Info.Full else Info.None
-                subtitleSearch.value = null
-                if (open) {
-                    v?.hideController()
-                    lifecycleScope.launch { panelScroll.scrollTo(0) }
-                }
+                if (info.value != Info.Full) openFull() else info.value = Info.None
             }
             return true
         }
@@ -685,7 +719,7 @@ private fun PlexNowPlaying(d: PlexDetail, positionMs: Long, durationMs: Long, mo
                     color = Palette.dim, fontSize = 14.sp,
                 )
             }
-            Text("☰  more about this", color = Palette.dim, fontSize = 13.sp)
+            Text("↓  More (or ☰): more about this, picture, subtitles", color = Palette.dim, fontSize = 13.sp)
         }
     }
 }
