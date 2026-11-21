@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Live TV gets Plex's ☰ panel**: ☰ (or Info) while watching opens the
+  full details of what's on over the left of the picture: the whole
+  description, time, category, poster where the guide has one, time
+  left, and what's on later on the channel. ↑/↓ scroll it when it doesn't
+  fit; CH+/CH− still change channel and the panel follows. Its buttons
+  are **Guide** (focused first, so ☰ then OK reaches the grid),
+  **Picture: Fit/Zoom/Stretch**, and **Subtitles: On/Off** when the
+  stream carries a subtitle track. ☰ or Back closes it. The banner's
+  hint line says so. Hold OK still cycles the picture size.
+
 ## 0.7.2
 
 - **Settings says plainly what's connected**: a tvtimes section ("✓

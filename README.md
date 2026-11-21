@@ -447,7 +447,8 @@ TV; the tvtimes pairing above would avoid the LAN path entirely, and does once t
 | Player | ↑ / ↓, CH+ / CH− | next / previous channel in the group |
 | | OK | show or hide what's on |
 | | ◀ | back to the previous channel |
-| | ☰ | guide, with the channel still playing in the corner |
+| | ☰ / Info | full details of what's on (whole description, later on this channel), with Guide, picture size and subtitles on/off |
+| | ☰ then OK | guide, with the channel still playing in the corner |
 | | Back | back to the list |
 | Plex | OK | open a list, or a movie/episode's details |
 | | OK on Resume / Play | play |

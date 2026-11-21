@@ -19,17 +19,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -59,7 +67,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * Fullscreen live TV. Up/down (or the channel keys) step through the group
- * the list was showing, OK shows what's on, Back returns to the list.
+ * the list was showing, OK shows what's on, ☰ (or Info) the full details
+ * panel -- the programme's whole description and what's on later, with
+ * Guide, Picture and Subtitles buttons, as Plex's player has -- and Back
+ * returns to the list.
  *
  * Zapping waits [TUNE_DELAY_MS] after the last key press before opening a
  * stream: many IPTV providers allow one connection per account, so racing
@@ -82,6 +93,14 @@ class PlayerActivity : ComponentActivity() {
     private val bannerVisible = mutableStateOf(true)
     private val guideOpen = mutableStateOf(false)
     private val guideInfo = mutableStateOf<GuideInfo?>(null)
+    /** The ☰ panel over the left of the picture. */
+    private val panelOpen = mutableStateOf(false)
+    /** Its details scroll with ↑/↓; back to the top each time it opens. */
+    private val panelScroll = androidx.compose.foundation.ScrollState(0)
+    private val picture = mutableStateOf(PictureMode.Fit)
+    /** Whether the stream has any subtitle track (DVB, CEA-608, WebVTT in HLS), and whether one is showing. */
+    private val textAvailable = mutableStateOf(false)
+    private val textOn = mutableStateOf(false)
     private var tuneJob: Job? = null
     private var bannerJob: Job? = null
     private var tuneStarted = 0L
@@ -100,6 +119,7 @@ class PlayerActivity : ComponentActivity() {
             ?: listOf(Channel(0, intent.getStringExtra(EXTRA_NAME).orEmpty(), url, null, null))
         index.intValue = lineup.indexOfFirst { it.url == url }.coerceAtLeast(0)
         guideOpen.value = intent.getBooleanExtra(EXTRA_GUIDE, false)
+        picture.value = PictureMode.load(this)
 
         setContent {
             RadiotimesTheme {
@@ -123,7 +143,7 @@ class PlayerActivity : ComponentActivity() {
                             PlayerView(ctx).apply {
                                 useController = false
                                 isFocusable = false
-                                resizeMode = PictureMode.load(this@PlayerActivity).resizeMode
+                                resizeMode = picture.value.resizeMode
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                                 player = this@PlayerActivity.player
                                 view = this
@@ -140,7 +160,7 @@ class PlayerActivity : ComponentActivity() {
                     )
                     val current = channel
                     AnimatedVisibility(
-                        visible = !guideOpen.value && (bannerVisible.value || status.value is Status.Failed),
+                        visible = !guideOpen.value && !panelOpen.value && (bannerVisible.value || status.value is Status.Failed),
                         enter = fadeIn(),
                         exit = fadeOut(),
                         modifier = Modifier.align(Alignment.BottomCenter),
@@ -153,6 +173,17 @@ class PlayerActivity : ComponentActivity() {
                         }
                         val previous = previousUrl.value?.let { url -> lineup.firstOrNull { it.url == url } }
                         if (current != null) Banner(current, nowNext[current.url], line, failed = status.value is Status.Failed, previous = previous)
+                    }
+                    if (current != null && panelOpen.value && !guideOpen.value) {
+                        LivePanel(
+                            current, nowNext[current.url], Modifier.align(Alignment.CenterStart),
+                            onGuide = ::openGuide,
+                            picture = picture.value,
+                            onPicture = ::cyclePicture,
+                            subtitles = if (textAvailable.value) textOn.value else null,
+                            onSubtitles = ::toggleSubtitles,
+                            scroll = panelScroll,
+                        )
                     }
                 }
             }
@@ -209,6 +240,12 @@ class PlayerActivity : ComponentActivity() {
                 reconnectAttempt = 0
                 reconnectSince = 0L
                 showBanner()
+            }
+
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                val text = tracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_TEXT }
+                textAvailable.value = text.any { it.isSupported }
+                textOn.value = text.any { it.isSelected }
             }
 
             override fun onPlaybackStateChanged(state: Int) {
@@ -450,6 +487,39 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val panelKey = event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_INFO
+        if (panelOpen.value) {
+            when (event.keyCode) {
+                // ☰, Info or Back: close it.
+                KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_BACK -> {
+                    if (event.action == KeyEvent.ACTION_UP) closePanel()
+                    return true
+                }
+                // ↑/↓ scroll the details (the buttons sit in one row, so
+                // the keys are otherwise unused), as in Plex's panel.
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        val step = PANEL_SCROLL_DP * resources.displayMetrics.density
+                        // A plain step: animateScrollBy needs the
+                        // composition's frame clock (it crashed the Plex player).
+                        lifecycleScope.launch {
+                            panelScroll.scrollBy(if (event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) step else -step)
+                        }
+                    }
+                    return true
+                }
+                // The channel keys still zap; the panel follows the channel.
+                KeyEvent.KEYCODE_CHANNEL_UP -> { if (down(event)) zap(+1); return true }
+                KeyEvent.KEYCODE_CHANNEL_DOWN -> { if (down(event)) zap(-1); return true }
+            }
+            // The buttons take ← → and OK.
+            return super.dispatchKeyEvent(event)
+        }
+        // Full screen: ☰ / Info open the panel (the guide is its first button).
+        if (!guideOpen.value && panelKey) {
+            if (event.action == KeyEvent.ACTION_UP) openPanel()
+            return true
+        }
         if (event.keyCode == KeyEvent.KEYCODE_MENU || (guideOpen.value && event.keyCode == KeyEvent.KEYCODE_BACK)) {
             if (event.action == KeyEvent.ACTION_UP) {
                 when {
@@ -497,7 +567,7 @@ class PlayerActivity : ComponentActivity() {
                 if (event.action == KeyEvent.ACTION_UP) flipBack()
                 true
             }
-            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_INFO -> {
+            KeyEvent.KEYCODE_DPAD_RIGHT -> {
                 if (event.action == KeyEvent.ACTION_UP) showBanner()
                 true
             }
@@ -509,10 +579,45 @@ class PlayerActivity : ComponentActivity() {
     private var okHeld = false
 
     private fun cyclePicture() {
-        val mode = PictureMode.load(this).next()
+        val mode = picture.value.next()
+        picture.value = mode
         PictureMode.save(this, mode)
         view?.resizeMode = mode.resizeMode
-        android.widget.Toast.makeText(this, "Picture: ${mode.label}", android.widget.Toast.LENGTH_SHORT).show()
+        // The panel's button shows the new size itself.
+        if (!panelOpen.value) android.widget.Toast.makeText(this, "Picture: ${mode.label}", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openPanel() {
+        panelOpen.value = true
+        bannerVisible.value = false
+        lifecycleScope.launch { panelScroll.scrollTo(0) }
+    }
+
+    private fun closePanel() {
+        panelOpen.value = false
+        showBanner()
+    }
+
+    /** The panel's Guide button: the grid, with the channel playing in the corner. */
+    private fun openGuide() {
+        panelOpen.value = false
+        guideInfo.value = null
+        guideOpen.value = true
+    }
+
+    /** Panel: subtitles off, or back on (a track in the device's language, else any). */
+    private fun toggleSubtitles() {
+        val exo = player ?: return
+        val on = !textOn.value
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, !on)
+            .apply {
+                if (on) {
+                    setPreferredTextLanguage(java.util.Locale.getDefault().language)
+                    setSelectUndeterminedTextLanguage(true)
+                }
+            }
+            .build()
     }
 
     /** Key down, including auto-repeat, so holding up/down keeps stepping. */
@@ -535,6 +640,8 @@ class PlayerActivity : ComponentActivity() {
             PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED,
         )
         private const val BANNER_MS = 5_000L
+        /** About four lines of the description per ↑/↓ press. */
+        private const val PANEL_SCROLL_DP = 92f
 
         fun intent(context: Context, channel: Channel, openGuide: Boolean = false): Intent =
             Intent(context, PlayerActivity::class.java)
@@ -580,11 +687,156 @@ private fun Banner(channel: Channel, nowNext: NowNext?, statusLine: String?, fai
                     Text("Next ${clockText(next.start)} · ${next.title}", color = Palette.dim, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (statusLine != null) Text(statusLine, color = if (failed) Palette.warn else Palette.dim, fontSize = 15.sp)
-                previous?.let {
-                    Text("◀  back to ${if (it.number > 0) "${it.number} " else ""}${it.name}", color = Palette.dim, fontSize = 13.sp, maxLines = 1)
-                }
+                Text(
+                    listOfNotNull(
+                        previous?.let { "◀  back to ${if (it.number > 0) "${it.number} " else ""}${it.name}" },
+                        "☰  more about this, picture size, guide",
+                    ).joinToString("      "),
+                    color = Palette.dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
 }
 
+
+/**
+ * ☰ while watching: everything known about what's on, over the left of
+ * the picture, with the player's options -- Plex's ☰ panel for live TV.
+ * The description and what's on later scroll with ↑/↓ (the activity
+ * scrolls [scroll]), so the buttons always stay on screen.
+ */
+@Composable
+private fun LivePanel(
+    channel: Channel,
+    nowNext: NowNext?,
+    modifier: Modifier,
+    onGuide: () -> Unit,
+    picture: PictureMode,
+    onPicture: () -> Unit,
+    subtitles: Boolean?,
+    onSubtitles: () -> Unit,
+    scroll: androidx.compose.foundation.ScrollState,
+) {
+    val now = rememberNow()
+    val p = nowNext?.now
+    // The rest of the evening on this channel, beyond now/next.
+    var later by androidx.compose.runtime.remember(channel.url) { mutableStateOf<List<Programme>?>(null) }
+    androidx.compose.runtime.LaunchedEffect(channel.url) {
+        val from = System.currentTimeMillis()
+        val json = Engine.call("schedule", channel.url, from, from + LATER_MS)
+        later = if (bridgeError(json) == null) parseProgrammes(json) else emptyList()
+    }
+    Column(
+        modifier
+            .width(620.dp)
+            .fillMaxHeight()
+            .background(Brush.horizontalGradient(listOf(Color(0xF20B0A1F), Color(0xCC0B0A1F), Color.Transparent)))
+            .padding(start = 48.dp, end = 40.dp, top = 28.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.weight(1f, fill = false).verticalScroll(scroll),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ChannelLogo(channel, 64.dp, 38.dp)
+                    Text(
+                        "${if (channel.number > 0) "${channel.number}  " else ""}${channel.name}",
+                        color = Palette.dim, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(clockText(now), color = Palette.text, fontSize = 18.sp)
+                }
+                Text(
+                    p?.let { listOfNotNull(it.title, it.year?.let { y -> "($y)" }).joinToString(" ") } ?: "No guide information",
+                    color = Palette.text, fontSize = 30.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                if (p != null) {
+                    Text(
+                        listOfNotNull("${clockText(p.start)} – ${clockText(p.stop)}", "${(p.stop - p.start) / 60_000} min").joinToString("   ·   "),
+                        color = Palette.text, fontSize = 15.sp,
+                    )
+                    p.category?.let { Text(it, color = Palette.accent, fontSize = 15.sp) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        p.poster?.let {
+                            coil.compose.AsyncImage(
+                                model = it, contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(100.dp, 150.dp).clip(RoundedCornerShape(6.dp)),
+                            )
+                        }
+                        Text(p.description ?: "No description.", color = Palette.text, fontSize = 16.sp, lineHeight = 23.sp, modifier = Modifier.weight(1f))
+                    }
+                }
+                // Later: the schedule once loaded, else just the guide's "next".
+                val upcoming = later?.filter { it.start >= (p?.stop ?: now) }?.take(LATER_COUNT)
+                    ?: listOfNotNull(nowNext?.next)
+                if (upcoming.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("Later on ${channel.name}", color = Palette.dim, fontSize = 14.sp)
+                    upcoming.forEach {
+                        Row {
+                            Text(clockText(it.start), color = Palette.dim, fontSize = 15.sp, modifier = Modifier.width(70.dp))
+                            Text(
+                                listOfNotNull(it.title, it.category).joinToString("  ·  "),
+                                color = Palette.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+            if (p != null && p.start <= now && now < p.stop) {
+                ProgressBar(p.progress(now), Modifier.width(420.dp))
+                Text("${(p.stop - now) / 60_000} min left  ·  ends at ${clockText(p.stop)}", color = Palette.dim, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(4.dp))
+            PanelButtons(onGuide, picture, onPicture, subtitles, onSubtitles)
+        }
+        val more = when {
+            scroll.maxValue == 0 -> ""
+            scroll.value == 0 -> "↓ more  ·  "
+            scroll.value >= scroll.maxValue -> "↑ back up  ·  "
+            else -> "↑↓ scroll  ·  "
+        }
+        Text("$more☰ or Back to close", color = Palette.dim, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun PanelButtons(
+    onGuide: () -> Unit,
+    picture: PictureMode,
+    onPicture: () -> Unit,
+    subtitles: Boolean?,
+    onSubtitles: () -> Unit,
+) {
+    // Focus starts on Guide, so ☰ then OK is still the way to the grid.
+    val first = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        repeat(20) {
+            if (runCatching { first.requestFocus() }.isSuccess) return@LaunchedEffect
+            delay(30)
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        androidx.compose.material3.OutlinedButton(
+            onClick = onGuide,
+            modifier = Modifier.focusRequester(first).focusRing(),
+        ) { Text("Guide") }
+        androidx.compose.material3.OutlinedButton(onClick = onPicture, modifier = Modifier.focusRing()) {
+            Text("Picture: ${picture.label}")
+        }
+        // Only when the stream carries a subtitle track to show or hide.
+        if (subtitles != null) {
+            androidx.compose.material3.OutlinedButton(onClick = onSubtitles, modifier = Modifier.focusRing()) {
+                Text(if (subtitles) "Subtitles: On" else "Subtitles: Off")
+            }
+        }
+    }
+}
+
+/** How far ahead the panel's "Later on" looks, and how many it lists. */
+private const val LATER_MS = 12 * 60 * 60 * 1000L
+private const val LATER_COUNT = 6
