@@ -192,11 +192,13 @@ You can rotate it from the same panel.
 
 ### 4. (Optional) Watch on a Fire TV with radiotimes
 
-Needs a Fire TV running Fire OS 7 or 8 (not Vega OS), and tvtimes 1.4.0
-or newer for pairing.
+Needs a Fire TV running Fire OS 7 or 8 (not Vega OS) or an Android TV /
+Google TV box such as an onn, and tvtimes 1.4.0 or newer for pairing.
 
 1. Install radiotimes with the Downloader code **8716486** (full steps:
-   [Install on a Fire TV Stick](#install-on-a-fire-tv-stick)).
+   [Install on a Fire TV Stick](#install-on-a-fire-tv-stick); for an
+   onn or other Google TV box, see
+   [Install on an onn or other Google TV box](#install-on-an-onn-or-other-google-tv-box)).
 2. Open it and choose **Pair with tvtimes**. It finds tvtimes on your
    network (or type `192.168.1.10:8888`) and shows a code.
 3. In tvtimes, go to **Settings → Devices** and enter the code.
@@ -509,6 +511,38 @@ Tokens are masked in everything the app logs or shows.
 
 **Not supported:** Fire TV devices running Vega OS (e.g. the Fire TV Stick 4K
 Select) don't run Android apps.
+
+## Install on an onn or other Google TV box
+
+radiotimes isn't Fire TV-specific: any Android TV / Google TV device on
+Android 9 or newer runs the same APK (the onn 4K and 4K Pro, Chromecast
+with Google TV, and so on).
+
+1. Turn on Developer options: *Settings → System → About* → select
+   **Android TV OS build** seven times.
+2. Install **Downloader** (by AFTVnews) from Google Play.
+3. Let it install apps: *Settings → Apps → Security & restrictions →
+   Unknown sources* → turn on **Downloader**. (Some boxes word it
+   *Install unknown apps*; Downloader also offers to open the page the
+   first time it needs it.)
+4. In Downloader, enter the code **8716486**. If Google Play Protect
+   warns that the app is unrecognised, choose *Install anyway*.
+5. Open radiotimes from the **Apps** tab (or *Your apps → See all*) and
+   pair as on a Fire TV. To pin it to the home screen, long-press it and
+   choose *Add to favourites*.
+
+The first time you use *Settings → Check for updates* in radiotimes,
+Android asks to allow radiotimes under *Unknown sources* too.
+
+**The remote has no ☰ button.** Press OK twice instead: OK shows what's
+on, and OK again (the banner's **More** button) opens the details panel,
+whose first button is the guide. In Plex, press OK, then ↓ to **More** in
+the controls' bottom row. Without channel buttons, ↑ / ↓ change channel.
+
+**With adb (developers):** in *Developer options* turn on **USB
+debugging** (on most boxes that also allows network adb), find the IP
+under *Settings → Network & Internet* → your network, and use the same
+`adb connect` / `adb install` commands as for the Stick above.
 
 ## Development
 
