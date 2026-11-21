@@ -7,12 +7,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel as Signal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 
 /**
@@ -47,10 +49,14 @@ object Tv {
     private const val ACCOUNT_EVERY_TICKS = 15
     private const val REPORT_DELAY_MS = 60 * 1000L
     private const val RETRY_AFTER_MS = 15 * 60 * 1000L
+    /** Coming back to the app looks at the line-up again, but no more often than this. */
+    private const val LINEUP_ON_RESUME_MS = 5 * 60 * 1000L
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
     private var retryAt = 0L
+    private var lineupCheckedAt = 0L
+    private val resumed = Signal<Unit>(Signal.CONFLATED)
 
     private val _lineup = MutableStateFlow<Lineup>(Lineup.Idle)
     val lineup: StateFlow<Lineup> = _lineup.asStateFlow()
@@ -148,6 +154,7 @@ object Tv {
             val channels = parseChannels(json)
             Log.i(TAG, "lineup | ${channels.size} channels in ${SystemClock.elapsedRealtime() - started} ms")
             _lineup.value = Lineup.Ready(channels)
+            lineupCheckedAt = SystemClock.elapsedRealtime()
 
             loadGuide("cached")
             refreshAccount()
@@ -155,15 +162,48 @@ object Tv {
 
             var ticks = 0
             while (isActive) {
-                delay(TICK_MS)
+                // A tick, or the app coming back to the front (see [foregrounded]).
+                if (withTimeoutOrNull(TICK_MS) { resumed.receive() } != null) {
+                    if (SystemClock.elapsedRealtime() - lineupCheckedAt >= LINEUP_ON_RESUME_MS) refreshLineup()
+                    continue
+                }
                 if (needsRefresh()) loadGuide("refresh") else refreshNowNext()
-                // Favourites and watchlist change in tvtimes; look again every 15 min.
+                // The line-up, favourites and watchlist change in tvtimes; look again every 15 min.
                 if (++ticks % ACCOUNT_EVERY_TICKS == 0) {
+                    refreshLineup()
                     refreshAccount()
                     reportWatches()
                 }
             }
         }
+    }
+
+    /**
+     * The app is in front again. A Fire TV keeps the process alive behind
+     * Home for days, so without this a channel added in tvtimes only showed
+     * up after a force stop. Handled inside the refresh loop, so it never
+     * runs alongside a guide load.
+     */
+    fun foregrounded() {
+        resumed.trySend(Unit)
+    }
+
+    /**
+     * Fetch the line-up again and swap it in only if it changed, so the list
+     * keeps its place otherwise. A changed line-up needs a fresh guide:
+     * tvdinner filters the guide to the channels it was loaded for, so the
+     * cached one has nothing for a new channel. A failure keeps what's there.
+     */
+    private suspend fun refreshLineup() {
+        val current = (_lineup.value as? Lineup.Ready)?.channels ?: return
+        lineupCheckedAt = SystemClock.elapsedRealtime()
+        val json = Engine.call("load_channels")
+        bridgeError(json)?.let { Log.w(TAG, "lineup | refresh failed, keeping ${current.size}: ${redactTokens(it)}"); return }
+        val channels = parseChannels(json)
+        if (channels == current) return
+        Log.i(TAG, "lineup | changed: ${current.size} → ${channels.size} channels")
+        _lineup.value = Lineup.Ready(channels)
+        loadGuide("refresh")
     }
 
     private fun needsRefresh(): Boolean {

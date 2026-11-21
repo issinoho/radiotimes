@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.5
+
+- **Channels added in tvtimes now appear without a restart**: the
+  channel list was read once when the app started, and a Fire TV keeps
+  the app running behind Home for days, so a new source only showed up
+  after a force stop. The list is now checked again every 15 minutes
+  and whenever you come back to the app (at most every 5 minutes). It
+  only changes on screen when tvtimes' line-up actually changed, and
+  then the guide is fetched fresh so the new channels have programmes.
+
 ## 0.7.4
 
 - **Zoom and Stretch now work on 16:9 streams with bars in the

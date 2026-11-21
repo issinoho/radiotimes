@@ -144,6 +144,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // The app can sit open for days on a TV; look again (at most hourly).
         Updates.check(this)
+        // ...and for channels added in tvtimes meanwhile (at most every 5 min).
+        Tv.foregrounded()
     }
 
     override fun onNewIntent(intent: Intent) {
