@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.4
 
 - **Zoom and Stretch now work on 16:9 streams with bars in the
   picture** (Pluto TV via FastChannels, most IPTV channels, some Plex
