@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.6
+
+- **Works with remotes that have no ☰ button** (onn and other Google TV
+  boxes, some Fire TV remotes): live TV's details panel and guide, and
+  the Plex player's details panel, could only be opened with ☰ or Info.
+  Live TV's banner now has a **More** button: OK shows the banner, OK
+  again opens the details (picture size, subtitles), and a third OK
+  opens the guide. OK no longer hides the banner early; it still goes
+  by itself after a few seconds. In the Plex player, a **More** button
+  sits at the start of the controls' bottom row, beside subtitles and
+  settings (OK, ↓, OK). ☰ and Info work as before.
+
 ## 0.7.5
 
 - **Channels added in tvtimes now appear without a restart**: the
