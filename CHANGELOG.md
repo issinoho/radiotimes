@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Zoom and Stretch now work on 16:9 streams with bars in the
+  picture** (Pluto TV via FastChannels, most IPTV channels, some Plex
+  files): they used to change nothing, because the video already had
+  the screen's shape. On such a stream Zoom now enlarges the picture by
+  4/3, cropping burned-in bars (4:3 fills the width, a letterboxed film
+  the height), and Stretch widens it by 4/3 (4:3 stretched to full
+  width). A video of a different shape from the screen behaves as
+  before. Subtitles, the buffering spinner and Plex's controls stay
+  where they were; the guide's corner preview always shows the whole
+  picture.
+
 ## 0.7.3
 
 - **Live TV gets Plex's ☰ panel**: ☰ (or Info) while watching opens the

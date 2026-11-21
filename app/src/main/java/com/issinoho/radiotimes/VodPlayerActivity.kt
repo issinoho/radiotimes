@@ -130,6 +130,7 @@ class VodPlayerActivity : ComponentActivity() {
                                 // at the end) it took focus from the ☰ panel's buttons.
                                 controllerAutoShow = false
                                 resizeMode = picture.value.resizeMode
+                                followPicture { picture.value }
                                 // The banner goes with the controller it was shown with.
                                 setControllerVisibilityListener(
                                     PlayerView.ControllerVisibilityListener { visibility ->
@@ -229,6 +230,10 @@ class VodPlayerActivity : ComponentActivity() {
                     "vod | ${item.title} first frame ${SystemClock.elapsedRealtime() - started} ms · " +
                         "${f?.sampleMimeType} ${f?.width}x${f?.height} · audio ${a?.sampleMimeType} ${a?.channelCount}ch",
                 )
+            }
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                view?.let { applyPicture(it, picture.value) }
             }
 
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -406,7 +411,7 @@ class VodPlayerActivity : ComponentActivity() {
         val mode = picture.value.next()
         picture.value = mode
         PictureMode.save(this, mode)
-        view?.resizeMode = mode.resizeMode
+        view?.let { applyPicture(it, mode) }
         showNotice("Picture: ${mode.label}")
     }
 

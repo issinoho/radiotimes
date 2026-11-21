@@ -144,6 +144,7 @@ class PlayerActivity : ComponentActivity() {
                                 useController = false
                                 isFocusable = false
                                 resizeMode = picture.value.resizeMode
+                                followPicture { picture.value }
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS)
                                 player = this@PlayerActivity.player
                                 view = this
@@ -240,6 +241,10 @@ class PlayerActivity : ComponentActivity() {
                 reconnectAttempt = 0
                 reconnectSince = 0L
                 showBanner()
+            }
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                view?.let { applyPicture(it, picture.value) }
             }
 
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -582,7 +587,7 @@ class PlayerActivity : ComponentActivity() {
         val mode = picture.value.next()
         picture.value = mode
         PictureMode.save(this, mode)
-        view?.resizeMode = mode.resizeMode
+        view?.let { applyPicture(it, mode) }
         // The panel's button shows the new size itself.
         if (!panelOpen.value) android.widget.Toast.makeText(this, "Picture: ${mode.label}", android.widget.Toast.LENGTH_SHORT).show()
     }
