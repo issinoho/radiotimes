@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.3
 
 - **Live TV gets Plex's ☰ panel**: ☰ (or Info) while watching opens the
   full details of what's on over the left of the picture: the whole
