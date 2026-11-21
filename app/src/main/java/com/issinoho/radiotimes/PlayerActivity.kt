@@ -819,7 +819,7 @@ private fun LivePanel(
             scroll.value >= scroll.maxValue -> "↑ back up  ·  "
             else -> "↑↓ scroll  ·  "
         }
-        Text("$moreBack to close", color = Palette.dim, fontSize = 13.sp)
+        Text("${more}Back to close", color = Palette.dim, fontSize = 13.sp)
     }
 }
 
