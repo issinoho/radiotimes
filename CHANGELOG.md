@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
 - **Plex only, without tvtimes**: the wizard's tvtimes step has a
   **Skip: Plex only** button, so radiotimes can be used as just a Plex
