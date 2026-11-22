@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Search channels by name**: a **Search channels** entry at the top of
+  the group rail. Type part of a channel's name (spaces and case don't
+  matter, so "bbc 1" finds BBC1) or its number, and the list narrows as
+  you type. The keyboard's Search key moves to the results; Back, or
+  moving to any group, ends the search.
+
 ## 0.8.0
 
 - **Plex only, without tvtimes**: the wizard's tvtimes step has a

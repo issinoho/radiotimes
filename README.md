@@ -392,6 +392,11 @@ clear the tvtimes link under **Settings → Advanced** and choose **Save
   **Watchlist** groups come from your tvtimes account (the watchlist as
   upcoming airings: "Today 21:00 · Title"). The guide shows at once from
   cache and refreshes in the background when it's over 6 hours old.
+- **Channel search:** **Search channels** at the top of the group rail.
+  OK opens a box (OK again brings up the keyboard); the list narrows to
+  channels whose name contains what you type, ignoring spaces and case
+  ("bbc 1" finds BBC1), or whose number starts with it. The keyboard's
+  Search key moves to the results; Back or any group ends the search.
 - **Live TV:** fullscreen with a now/next banner; ↑/↓ change channel, ◀
   goes back to the previous one. A dropped or frozen stream reconnects
   by itself (giving up after 10 minutes).
@@ -455,6 +460,7 @@ TV; the tvtimes pairing above would avoid the LAN path entirely, and does once t
 | Channel list | ↑ ↓ ← → | move between groups and channels |
 | | OK | play |
 | | ☰ (menu) | play the focused channel with the guide open |
+| | Search channels (top of the groups) | OK, OK again for the keyboard, type a name or number; Back ends the search |
 | | Settings (foot of the groups) | see whether tvtimes and Plex are connected; pair again, link Plex, check for updates (links themselves under Advanced) |
 | Player | ↑ / ↓, CH+ / CH− | next / previous channel in the group |
 | | OK | show what's on; OK again (its **More** button) opens the full details below |

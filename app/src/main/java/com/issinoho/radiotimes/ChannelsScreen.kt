@@ -58,6 +58,16 @@ private fun groupsOf(channels: List<Channel>, hasFavourites: Boolean, hasWatchli
 
 private fun norm(name: String) = name.trim().lowercase()
 
+/** For search: letters and digits only, so "bbc 1" finds "BBC1" and "bbcone" finds "BBC One". */
+private fun squash(text: String) = text.lowercase().filter { it.isLetterOrDigit() }
+
+/** Channels whose name contains [query] (see [squash]), or whose number starts with it. */
+private fun searchRows(channels: List<Channel>, query: String): List<ListRow> {
+    val q = squash(query)
+    if (q.isEmpty()) return emptyList()
+    return channels.filter { q in squash(it.name) || "${it.number}".startsWith(q) }.map { ListRow(it, null, it.url) }
+}
+
 private fun rowsIn(
     channels: List<Channel>,
     group: String,
@@ -198,7 +208,12 @@ private fun Lineup(
     val groups = remember(channels, favourites, watchlist) { groupsOf(channels, favourites.isNotEmpty(), watchlist.isNotEmpty()) }
     var group by rememberSaveable { mutableStateOf(ALL) }
     if (group !in groups) group = ALL
-    val rows = remember(channels, group, favourites, watchlist) { rowsIn(channels, group, favourites, watchlist, describe) }
+    // Search: OK on the rail's Search entry; any group focused, or Back, ends it.
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val rows = remember(channels, group, favourites, watchlist, searching, query) {
+        if (searching) searchRows(channels, query) else rowsIn(channels, group, favourites, watchlist, describe)
+    }
     // The channels the player steps through: this group's, once each.
     val shown = remember(rows) { rows.map { it.channel }.distinctBy { it.url } }
     var focused by remember { mutableStateOf<Channel?>(null) }
@@ -228,6 +243,25 @@ private fun Lineup(
             listState.scrollToItem(0)
         }
     }
+    // ...and so does each new search.
+    LaunchedEffect(searching, query) { if (searching) listState.scrollToItem(0) }
+    val searchRequester = remember { FocusRequester() }
+    val searchField = remember { FocusRequester() }
+    LaunchedEffect(searching) {
+        if (!searching) return@LaunchedEffect
+        repeat(10) {
+            if (runCatching { searchField.requestFocus() }.isSuccess) return@LaunchedEffect
+            delay(16)
+        }
+    }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // Back ends the search. Focus goes to the rail's Search entry first:
+    // the field or result it was on is about to leave the screen.
+    androidx.activity.compose.BackHandler(enabled = searching) {
+        runCatching { searchRequester.requestFocus() }
+        searching = false
+        query = ""
+    }
 
     // Coming back to the rail lands on the selected group, not whichever
     // group happens to sit level with the channel row. (Not Compose's
@@ -244,16 +278,38 @@ private fun Lineup(
                 .fillMaxHeight()
                 .focusProperties {
                     enter = {
-                        if (railState.layoutInfo.visibleItemsInfo.any { it.index == selectedIndex }) selectedGroupRequester
-                        else FocusRequester.Default
+                        // Search sits first in the rail (item 0), so groups start at index 1.
+                        val visible = railState.layoutInfo.visibleItemsInfo
+                        when {
+                            searching && visible.any { it.index == 0 } -> searchRequester
+                            !searching && visible.any { it.index == selectedIndex + 1 } -> selectedGroupRequester
+                            else -> FocusRequester.Default
+                        }
                     }
                 },
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            item(key = "search") {
+                RailButton(
+                    if (searching) "Search: ${query.trim().ifBlank { "…" }}" else "Search channels",
+                    topGap = 0.dp,
+                    modifier = Modifier.focusRequester(searchRequester).padding(bottom = 10.dp),
+                ) {
+                    if (searching) {
+                        runCatching { searchField.requestFocus() }
+                    } else {
+                        searching = true
+                    }
+                }
+            }
             itemsIndexed(groups, key = { _, g -> g }) { i, g ->
                 val count = remember(channels, g, favourites, watchlist) { rowsIn(channels, g, favourites, watchlist, describe).size }
                 GroupRow(
-                    g, count, selected = g == group, onFocused = { group = g },
+                    g, count, selected = !searching && g == group,
+                    onFocused = {
+                        group = g
+                        if (searching) { searching = false; query = "" }
+                    },
                     modifier = if (i == selectedIndex) Modifier.focusRequester(selectedGroupRequester) else Modifier,
                 )
             }
@@ -264,26 +320,49 @@ private fun Lineup(
             }
             item(key = "settings") { RailButton("⚙  Settings", topGap = 14.dp, onClick = onSettings) }
         }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            contentPadding = PaddingValues(vertical = 4.dp),
-        ) {
-            itemsIndexed(rows, key = { _, r -> r.key }) { index, row ->
-                val channel = row.channel
-                ChannelRow(
-                    channel = channel,
-                    note = row.note,
-                    nowNext = nowNext[channel.url],
-                    now = now,
-                    modifier = if (index == target) Modifier.focusRequester(targetRequester) else Modifier,
-                    onFocused = {
-                        focused = channel
-                        onFocusChannel(channel, shown)
-                    },
-                    onClick = { onPlay(channel, shown) },
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            if (searching) {
+                // Focus lands here only after OK on Search (OK again opens the
+                // keyboard); results filter as you type, and the keyboard's
+                // Search key moves down to them.
+                androidx.compose.material3.OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Channel name or number") },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
+                        if (rows.isNotEmpty()) focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
+                    }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(searchField),
                 )
+                Spacer(Modifier.height(6.dp))
+                when {
+                    query.isBlank() -> Text("Type part of a channel's name, or its number", color = Palette.dim, fontSize = 15.sp)
+                    rows.isEmpty() -> Text("No channel matches \u201c${query.trim()}\u201d", color = Palette.dim, fontSize = 15.sp)
+                }
+            }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = PaddingValues(vertical = 4.dp),
+            ) {
+                itemsIndexed(rows, key = { _, r -> r.key }) { index, row ->
+                    val channel = row.channel
+                    ChannelRow(
+                        channel = channel,
+                        note = row.note,
+                        nowNext = nowNext[channel.url],
+                        now = now,
+                        modifier = if (index == target) Modifier.focusRequester(targetRequester) else Modifier,
+                        onFocused = {
+                            focused = channel
+                            onFocusChannel(channel, shown)
+                        },
+                        onClick = { onPlay(channel, shown) },
+                    )
+                }
             }
         }
         Details(focused?.takeIf { it in shown }, focused?.let { nowNext[it.url] }, now, Modifier.width(280.dp).fillMaxHeight())
