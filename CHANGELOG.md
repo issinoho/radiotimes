@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1
 
 - **Search channels by name**: a **Search channels** entry at the top of
   the group rail. Type part of a channel's name (spaces and case don't
