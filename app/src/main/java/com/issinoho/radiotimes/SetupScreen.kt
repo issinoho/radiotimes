@@ -83,7 +83,7 @@ fun SetupScreen(
 
         if (!plexBusy) Section("tvtimes") {
             val (status, ok) = when {
-                !hasTvtimes -> "Not connected" to false
+                !hasTvtimes -> "Not connected (Plex only)" to false
                 lineup is Tv.Lineup.Ready -> "Connected  ·  ${lineup.channels.size} channels  ·  ${hostOf(initial)}" to true
                 lineup is Tv.Lineup.Failed -> "Can't connect to ${hostOf(initial)}: ${redactTokens(lineup.message)}" to false
                 else -> "Connecting to ${hostOf(initial)}…" to null
@@ -171,7 +171,8 @@ private fun AdvancedLinks(
 ) {
     var url by remember { mutableStateOf(initial) }
     var plex by remember(initialPlex) { mutableStateOf(initialPlex) }
-    val valid = url.trim().let { it.startsWith("tvtimes://") || it.startsWith("tvtimess://") } && "token=" in url
+    // Blank is valid: no tvtimes, Plex only.
+    val valid = url.isBlank() || url.trim().let { it.startsWith("tvtimes://") || it.startsWith("tvtimess://") } && "token=" in url
     val back = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { back.requestFocus() } }
     Row(Modifier.fillMaxSize().padding(horizontal = 56.dp, vertical = 28.dp), horizontalArrangement = Arrangement.spacedBy(36.dp)) {
@@ -179,7 +180,8 @@ private fun AdvancedLinks(
             Text("Advanced", color = Palette.text, fontSize = 32.sp, fontWeight = FontWeight.Bold)
             Text(
                 "The links themselves, for when pairing or plex.tv/link can't be used. The tvtimes link is under " +
-                    "tvtimes → Settings → Export feeds; send it from your phone with the code on the right, or type it.",
+                    "tvtimes → Settings → Export feeds; send it from your phone with the code on the right, or type it. " +
+                    "Leave it empty to use radiotimes for Plex only.",
                 color = Palette.dim, fontSize = 16.sp, lineHeight = 23.sp,
             )
             OutlinedTextField(
@@ -202,7 +204,9 @@ private fun AdvancedLinks(
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Button(onClick = { onConnect(url.trim(), plex) }, enabled = valid, modifier = Modifier.focusRing()) { Text("Save and connect") }
+                Button(onClick = { onConnect(url.trim(), plex) }, enabled = valid, modifier = Modifier.focusRing()) {
+                    Text(if (url.isBlank()) "Save (Plex only)" else "Save and connect")
+                }
                 OutlinedButton(onClick = onDone, modifier = Modifier.focusRequester(back).focusRing()) { Text("Back") }
             }
         }

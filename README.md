@@ -356,6 +356,14 @@ in, and enter it. Every server on that Plex account appears as its own
 entry in the channel list's group rail, with On Deck, search and each
 library.
 
+**Plex only, without tvtimes:** radiotimes also works as just a Plex
+player. At the wizard's tvtimes step choose **Skip: Plex only**, then
+link Plex. The channel list is then just your Plex servers and
+Settings, with no live TV, guide or watch reporting. To add tvtimes
+later, use **Settings → Pair with tvtimes**. To go back to Plex only,
+clear the tvtimes link under **Settings → Advanced** and choose **Save
+(Plex only)**.
+
 <!-- screenshot: docs/quickstart/13-radiotimes-plex-code.png — the plex.tv/link code on the TV -->
 <!-- screenshot: docs/quickstart/14-radiotimes-plex-library.png — a Plex library in radiotimes -->
 
@@ -368,7 +376,9 @@ library.
 
 ## What it does
 
-- **Setup:** a first-run wizard (Welcome → tvtimes → Plex → Ready).
+- **Setup:** a first-run wizard (Welcome → tvtimes → Plex → Ready;
+  either tvtimes or Plex can be skipped, so it also works as just a
+  Plex player).
   **Pair with tvtimes**: the TV finds tvtimes on your network (or you
   type its address), shows a code, and you enter it in tvtimes under
   Settings → Devices; the TV gets its own revocable feed token. Or scan

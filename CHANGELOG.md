@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Plex only, without tvtimes**: the wizard's tvtimes step has a
+  **Skip: Plex only** button, so radiotimes can be used as just a Plex
+  player. The channel list then shows your Plex servers and Settings.
+  Pair with tvtimes in Settings at any time to add live TV, or clear the
+  tvtimes link under Settings → Advanced to go back to Plex only.
+
 ## 0.7.6
 
 - **Works with remotes that have no ☰ button** (onn and other Google TV

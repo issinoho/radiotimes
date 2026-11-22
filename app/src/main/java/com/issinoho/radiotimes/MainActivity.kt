@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 /**
  * Setup (once) and the channel list. ☰ opens the guide (over the focused
  * channel, playing); Settings at the foot of the group rail reopens setup.
+ * Without tvtimes (a choice made in the wizard or Settings) the list is
+ * just the Plex servers and Settings.
  *
  * The links can also be sent from a computer, which saves typing tokens
  * with the remote; this works whether or not the app is already open:
@@ -43,8 +45,9 @@ class MainActivity : ComponentActivity() {
             val saved = Prefs.tvtimesUrl(this)
             if (saved == null) {
                 // A fresh install: the step-by-step wizard. (Settings later
-                // opens the one-page setup screen instead.)
-                screen.value = Screen.Wizard
+                // opens the one-page setup screen instead.) Plex only, set
+                // up without tvtimes, goes straight to the list.
+                if (!Prefs.withoutTvtimes(this)) screen.value = Screen.Wizard
             } else if (Tv.lineup.value == Tv.Lineup.Idle) {
                 Tv.connect(saved, cacheDir.absolutePath)
             }
@@ -75,11 +78,15 @@ class MainActivity : ComponentActivity() {
                                 plexServers = plexServers,
                                 onTvtimes = { useTvtimes(it) },
                                 onPlexLinked = { setPlex(it) },
-                                onDone = { screen.value = Screen.Channels },
+                                onDone = {
+                                    // Finished without a tvtimes link: that was skipped on purpose.
+                                    if (Prefs.tvtimesUrl(this) == null) Prefs.setWithoutTvtimes(this, true)
+                                    screen.value = Screen.Channels
+                                },
                             )
                         }
                         Screen.Setup -> {
-                            val canCancel = Prefs.tvtimesUrl(this) != null
+                            val canCancel = Prefs.setUp(this)
                             BackHandler(enabled = canCancel) { screen.value = Screen.Channels }
                             // The phone setup page lives exactly as long as this screen.
                             var phoneUrl by remember { mutableStateOf<String?>(null) }
@@ -88,7 +95,7 @@ class MainActivity : ComponentActivity() {
                                     if (plex.isNotEmpty()) setPlex(plex)
                                     when {
                                         tvtimes != null -> connect(tvtimes)
-                                        Prefs.tvtimesUrl(this@MainActivity) != null -> screen.value = Screen.Channels
+                                        Prefs.setUp(this@MainActivity) -> screen.value = Screen.Channels
                                     }
                                 }
                                 phoneUrl = server.start()
@@ -106,7 +113,7 @@ class MainActivity : ComponentActivity() {
                                 onPlexLinked = { setPlex(it) },
                                 onConnect = { url, plex ->
                                     setPlex(Prefs.splitLinks(plex))
-                                    connect(url)
+                                    if (url.isBlank()) withoutTvtimes() else connect(url)
                                 },
                                 onCancel = { screen.value = Screen.Channels },
                             )
@@ -120,6 +127,7 @@ class MainActivity : ComponentActivity() {
                             val favourites by Tv.favourites.collectAsState()
                             val watchlist by Tv.watchlist.collectAsState()
                             ChannelsScreen(
+                                hasTvtimes = Prefs.tvtimesUrl(this) != null,
                                 lineup = lineup,
                                 guide = guide,
                                 nowNext = nowNext,
@@ -179,7 +187,17 @@ class MainActivity : ComponentActivity() {
 
     private fun useTvtimes(url: String) {
         Prefs.setTvtimesUrl(this, url)
+        Prefs.setWithoutTvtimes(this, false)
         Tv.connect(url, cacheDir.absolutePath)
+    }
+
+    /** Plex only: forget the tvtimes link (Advanced, saved with it blank). */
+    private fun withoutTvtimes() {
+        Prefs.clearTvtimesUrl(this)
+        Prefs.setWithoutTvtimes(this, true)
+        Tv.disconnect()
+        focusedChannel = null
+        screen.value = Screen.Channels
     }
 
     private fun play(channel: Channel, list: List<Channel>, openGuide: Boolean = false) {

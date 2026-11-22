@@ -178,6 +178,19 @@ object Tv {
         }
     }
 
+    /** Stop using tvtimes (Plex only): no line-up, guide or reporting until [connect]. */
+    fun disconnect() {
+        job?.cancel()
+        job = null
+        reportJob?.cancel()
+        _lineup.value = Lineup.Idle
+        _guide.value = Guide()
+        _nowNext.value = emptyMap()
+        _favourites.value = emptySet()
+        _watchlist.value = emptyList()
+        zapList = emptyList()
+    }
+
     /**
      * The app is in front again. A Fire TV keeps the process alive behind
      * Home for days, so without this a channel added in tvtimes only showed
@@ -290,11 +303,23 @@ object Prefs {
     private const val KEY_URL = "tvtimes_url"
     private const val KEY_LAST = "last_played"
     private const val KEY_PLEX = "plex_links"
+    private const val KEY_NO_TVTIMES = "without_tvtimes"
 
     private fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     fun tvtimesUrl(context: Context): String? = prefs(context).getString(KEY_URL, null)?.ifBlank { null }
     fun setTvtimesUrl(context: Context, url: String) = prefs(context).edit().putString(KEY_URL, url).apply()
+    fun clearTvtimesUrl(context: Context) = prefs(context).edit().remove(KEY_URL).apply()
+
+    /**
+     * Set up without tvtimes (Plex only), as a choice: without it a missing
+     * tvtimes link means a fresh install, which opens the wizard.
+     */
+    fun withoutTvtimes(context: Context): Boolean = prefs(context).getBoolean(KEY_NO_TVTIMES, false)
+    fun setWithoutTvtimes(context: Context, on: Boolean) = prefs(context).edit().putBoolean(KEY_NO_TVTIMES, on).apply()
+
+    /** Past the first-run wizard: a tvtimes link, or the choice to go without one. */
+    fun setUp(context: Context): Boolean = tvtimesUrl(context) != null || withoutTvtimes(context)
     fun lastPlayed(context: Context): String? = prefs(context).getString(KEY_LAST, null)
     fun setLastPlayed(context: Context, url: String) = prefs(context).edit().putString(KEY_LAST, url).apply()
     fun plexLinks(context: Context): List<String> = splitLinks(prefs(context).getString(KEY_PLEX, null).orEmpty())

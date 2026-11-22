@@ -41,7 +41,9 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 /**
- * First run: Welcome → tvtimes → Plex (optional) → Ready.
+ * First run: Welcome → tvtimes → Plex (optional) → Ready. tvtimes can be
+ * skipped too, for radiotimes as just a Plex player; finishing without a
+ * tvtimes link records that choice ([Prefs.withoutTvtimes]).
  *
  * Each step leads with the code-based way (tvtimes pairing, plex.tv/link);
  * the phone page and typed links sit behind "Other ways to connect".
@@ -116,7 +118,10 @@ private fun Welcome(onNext: () -> Unit) {
                 "the TV pairs with tvtimes and links to your Plex account with short codes.",
             color = Palette.dim, fontSize = 19.sp, lineHeight = 28.sp,
         )
-        Text("You'll need to be signed in to tvtimes on a phone or computer and, optionally, a Plex account.", color = Palette.dim, fontSize = 16.sp)
+        Text(
+            "You'll need to be signed in to tvtimes on a phone or computer, a Plex account, or both.",
+            color = Palette.dim, fontSize = 16.sp,
+        )
         Spacer(Modifier.height(8.dp))
         Button(onClick = onNext, modifier = Modifier.focusRequester(go).focusRing()) { Text("Get started", fontSize = 17.sp) }
     }
@@ -186,7 +191,13 @@ private fun TvtimesStep(phoneUrl: String?, lineup: Tv.Lineup, onTvtimes: (String
             }
             if (lineup !is Tv.Lineup.Ready && !pairing) {
                 if (!fallback) {
-                    OtherWays { fallback = true }
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        OtherWays { fallback = true }
+                        // Plex only: no live TV. Hidden while a link is connecting.
+                        if (lineup != Tv.Lineup.Loading) {
+                            OutlinedButton(onClick = onNext, modifier = Modifier.focusRing()) { Text("Skip: Plex only") }
+                        }
+                    }
                 } else {
                     Text(
                         "Or send your tvtimes link (Settings → Export feeds) from your phone with the code on the " +
@@ -296,16 +307,19 @@ private fun Ready(lineup: Tv.Lineup, servers: List<PlexServer>, onDone: () -> Un
     val usable = servers.filter { it.error == null }
     Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.width(760.dp).padding(top = 20.dp)) {
         Text("You're all set", color = Palette.text, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-        channels?.let { Text("✓  tvtimes: $it channels", color = Palette.text, fontSize = 18.sp) }
+        Text(
+            if (channels == null) "–  tvtimes: not added (Plex only; you can pair it later in Settings)" else "✓  tvtimes: $channels channels",
+            color = Palette.text, fontSize = 18.sp,
+        )
         Text(
             if (usable.isEmpty()) "–  Plex: not added (you can link it later in Settings)" else "✓  Plex: ${usable.joinToString(", ") { it.name }}",
             color = Palette.text, fontSize = 18.sp,
         )
         Spacer(Modifier.height(6.dp))
         Text("A few things worth knowing", color = Palette.dim, fontSize = 16.sp)
-        listOf(
-            "☰  opens the guide over the picture; the channel keeps playing in the corner",
-            "OK  on a programme previews it; OK again shows everything about it",
+        listOfNotNull(
+            "☰  opens the guide over the picture; the channel keeps playing in the corner".takeIf { channels != null },
+            "OK  on a programme previews it; OK again shows everything about it".takeIf { channels != null },
             "Settings  at the bottom of the channel groups, to change links later",
         ).forEach { Text(it, color = Palette.text, fontSize = 17.sp) }
         Spacer(Modifier.height(10.dp))

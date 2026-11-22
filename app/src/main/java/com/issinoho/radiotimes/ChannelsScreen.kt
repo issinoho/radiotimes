@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -80,8 +81,13 @@ private fun rowsIn(
     else -> channels.filter { it.group == group }.map { ListRow(it, null, it.url) }
 }
 
+/**
+ * The channel list: groups rail, channels, details. Without tvtimes
+ * ([hasTvtimes] false, Plex only) it's just the Plex servers and Settings.
+ */
 @Composable
 fun ChannelsScreen(
+    hasTvtimes: Boolean,
     lineup: Tv.Lineup,
     guide: Tv.Guide,
     nowNext: Map<String, NowNext>,
@@ -98,8 +104,12 @@ fun ChannelsScreen(
     val now = rememberNow()
     Column(Modifier.fillMaxSize().padding(horizontal = 40.dp, vertical = 24.dp)) {
         val update by Updates.available.collectAsState()
-        Header(guide, lineup, now, update)
+        Header(guide, lineup, now, update, hasTvtimes)
         Spacer(Modifier.height(12.dp))
+        if (!hasTvtimes) {
+            PlexOnly(plexServers, onPlex, onChangeLink)
+            return@Column
+        }
         when (lineup) {
             Tv.Lineup.Idle, Tv.Lineup.Loading -> Centred { Text("Connecting to tvtimes…", color = Palette.dim, fontSize = 20.sp) }
             is Tv.Lineup.Failed -> Centred {
@@ -125,7 +135,7 @@ private fun Centred(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Header(guide: Tv.Guide, lineup: Tv.Lineup, now: Long, update: String?) {
+private fun Header(guide: Tv.Guide, lineup: Tv.Lineup, now: Long, update: String?, hasTvtimes: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Text("radiotimes", color = Palette.text, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(24.dp))
@@ -146,8 +156,10 @@ private fun Header(guide: Tv.Guide, lineup: Tv.Lineup, now: Long, update: String
             Text("Update $update available · Downloader code ${Updates.DOWNLOADER_CODE}", color = Palette.accent, fontSize = 14.sp, maxLines = 1)
             Spacer(Modifier.width(20.dp))
         }
-        Text("☰ guide", color = Palette.dim, fontSize = 13.sp)
-        Spacer(Modifier.width(20.dp))
+        if (hasTvtimes) {
+            Text("☰ guide", color = Palette.dim, fontSize = 13.sp)
+            Spacer(Modifier.width(20.dp))
+        }
         Text(clockText(now), color = Palette.text, fontSize = 22.sp)
     }
 }
@@ -278,13 +290,63 @@ private fun Lineup(
     }
 }
 
+/**
+ * Plex only (no tvtimes): the rail's Plex servers and Settings, nothing
+ * live. Focus starts on the first server, or Settings while there's none,
+ * and moves to the first server when one appears (servers load after the
+ * screen does).
+ */
+@Composable
+private fun PlexOnly(plexServers: List<PlexServer>, onPlex: (PlexServer) -> Unit, onSettings: () -> Unit) {
+    val usable = plexServers.filter { it.error == null }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(usable.isEmpty()) {
+        repeat(10) {
+            if (runCatching { first.requestFocus() }.isSuccess) return@LaunchedEffect
+            delay(16)
+        }
+    }
+    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(32.dp)) {
+        Column(Modifier.width(240.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            usable.forEachIndexed { i, server ->
+                RailButton("▶  ${server.name}", topGap = 2.dp, modifier = if (i == 0) Modifier.focusRequester(first) else Modifier) {
+                    onPlex(server)
+                }
+            }
+            RailButton(
+                "⚙  Settings", topGap = if (usable.isEmpty()) 2.dp else 14.dp,
+                modifier = if (usable.isEmpty()) Modifier.focusRequester(first) else Modifier,
+                onClick = onSettings,
+            )
+        }
+        Column(Modifier.weight(1f).padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val (title, body) = when {
+                usable.isNotEmpty() -> "Plex" to "No live TV: radiotimes is set up without tvtimes. To add your tvtimes " +
+                    "channels and guide, pair it in Settings."
+                plexServers.isNotEmpty() -> "Can't reach Plex" to
+                    "None of your Plex servers answered. Check the server is on, or link Plex again in Settings."
+                else -> "Nothing to watch yet" to
+                    "radiotimes is set up without tvtimes and no Plex server is linked. Open Settings to link your " +
+                    "Plex account or pair with tvtimes."
+            }
+            Text(title, color = Palette.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Text(body, color = Palette.dim, fontSize = 16.sp, lineHeight = 23.sp, modifier = Modifier.widthIn(max = 560.dp))
+        }
+    }
+}
+
 /** A rail entry that does something on OK rather than selecting a group (Plex servers, Settings). */
 @Composable
-private fun RailButton(label: String, topGap: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
+private fun RailButton(
+    label: String,
+    topGap: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     var hasFocus by remember { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = modifier
             .padding(top = topGap)
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
