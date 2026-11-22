@@ -1,5 +1,7 @@
 # radiotimes
 
+<p align="center"><img src="docs/banner.svg" alt="radiotimes: a vintage listings-magazine style banner with a retro TV showing the channel guide" width="100%"></p>
+
 A Fire TV app for watching live TV from a [tvtimes](https://github.com/issinoho/tvtimes)
 server, using [tvdinner](https://github.com/issinoho/tvdinner) as its engine.
 
