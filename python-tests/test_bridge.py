@@ -342,9 +342,10 @@ PLEX_ROUTES: dict[str, object] = {
                 {"ratingKey": "10", "title": "Casino Royale", "type": "movie", "year": 2006, "summary": "Bond.",
                  "viewOffset": 600000, "duration": 8700000, "contentRating": "12",
                  "Genre": [{"tag": "Action"}], "Role": [{"tag": "Daniel Craig"}, {"tag": "Eva Green"}],
-                 "Media": [{"videoResolution": "1080", "videoCodec": "h264", "Part": [{"key": "/library/parts/99/file.mkv",
+                 "Media": [{"videoResolution": "1080", "videoCodec": "h264", "Part": [{"id": 99, "key": "/library/parts/99/file.mkv",
                    "Stream": [
-                       {"streamType": 2, "displayTitle": "English (AC3 5.1)", "selected": True},
+                       {"id": 501, "streamType": 2, "displayTitle": "English (AC3 5.1)", "languageTag": "en", "selected": True},
+                       {"id": 502, "streamType": 2, "displayTitle": "Français (AAC Stereo)", "languageCode": "fra"},
                        {"streamType": 3, "codec": "vobsub", "displayTitle": "English (embedded)"},
                        {"streamType": 3, "codec": "srt", "key": "/library/streams/7", "languageTag": "en",
                         "displayTitle": "English (SRT External)"},
@@ -402,6 +403,11 @@ def test_plex_library_children_and_resolve(plex) -> None:
         "url": f"{PLEX}/library/streams/7?X-Plex-Token={PLEX_TOKEN}", "mime": "application/x-subrip",
         "language": "en", "label": "English (SRT External)",
     }]
+    assert item["part_id"] == "99"
+    assert item["audio_streams"] == [
+        {"id": "501", "language": "en", "label": "English (AC3 5.1)", "selected": True},
+        {"id": "502", "language": "fra", "label": "Français (AAC Stereo)", "selected": False},
+    ]
 
 
 def test_plex_resolve_survives_missing_details(plex, monkeypatch) -> None:
@@ -614,6 +620,21 @@ def test_plex_transcode_url_and_stop(plex, monkeypatch) -> None:
     q = dict(up.parse_qsl(parts.query))
     assert q["path"] == "/library/metadata/10" and q["protocol"] == "hls" and q["session"] == "sess-1"
     assert q["X-Plex-Platform"] == "Chrome" and q["X-Plex-Token"] == PLEX_TOKEN
+
+    # No audio choice given: Plex's own selection stands, nothing is changed.
+    puts: list[tuple[str, dict]] = []
+
+    def put(u: str, *args: object, **kwargs: object):
+        puts.append((u, dict(kwargs.get("params") or {})))
+        return _FakeResponse({})
+
+    monkeypatch.setattr(requests, "put", put)
+    assert puts == []
+    # With one, the part's audio selection is set before the decision.
+    decisions.clear()
+    json.loads(bridge.plex_transcode_url(0, "10", "sess-2", "99", "502"))["url"]
+    assert puts == [(f"{PLEX}/library/parts/99", {"audioStreamID": "502", "allParts": "1"})]
+    assert len(decisions) == 1
 
     seen: list[tuple[str, dict]] = []
 

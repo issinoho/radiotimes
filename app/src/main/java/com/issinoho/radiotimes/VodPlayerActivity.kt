@@ -31,6 +31,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -69,10 +70,13 @@ import java.util.UUID
 class VodPlayerActivity : ComponentActivity() {
     private data class Marker(val startMs: Long, val endMs: Long)
     private data class Sidecar(val url: String, val mime: String, val language: String?, val label: String?)
+    /** One of the file's audio tracks as Plex lists it (what the converted stream is made from). */
+    private data class PlexAudio(val id: String, val language: String?, val label: String, val selected: Boolean)
     private data class Item(
         val title: String, val url: String, val ratingKey: String, val resumeSeconds: Double?,
         val seriesTitle: String?, val parentKey: String?, val grandparentKey: String?,
         val intro: Marker?, val credits: Marker?, val sidecars: List<Sidecar>,
+        val partId: String?, val audioStreams: List<PlexAudio>,
     )
 
     private var player: ExoPlayer? = null
@@ -86,6 +90,8 @@ class VodPlayerActivity : ComponentActivity() {
     /** Set while playing Plex's converted (transcoded) stream instead of the file. */
     private var transcodeSession: String? = null
     private var transcodeUrl: String? = null
+    /** The Plex audio stream the converted stream was made with (null: Plex's own choice). */
+    private var transcodeAudio: String? = null
     private val notice = mutableStateOf<String?>(null)
     private var noticeJob: Job? = null
     /** What's playing, for the info banner (OK) and details panel (☰). */
@@ -97,6 +103,8 @@ class VodPlayerActivity : ComponentActivity() {
     /** Whether the item has any subtitle track (file or Plex sidecar), and whether one is showing. */
     private val textAvailable = mutableStateOf(false)
     private val textOn = mutableStateOf(false)
+    /** The ☰ panel's audio button: the playing track's language, or null when there's nothing to switch to. */
+    private val audioLabel = mutableStateOf<String?>(null)
     private var okHeld = false
     /** The ☰ panel's subtitle search: null = showing the panel's buttons. */
     private val subtitleSearch = mutableStateOf<SubtitleSearch?>(null)
@@ -155,6 +163,8 @@ class VodPlayerActivity : ComponentActivity() {
                             onPicture = ::cyclePicture,
                             subtitles = if (textAvailable.value) textOn.value else null,
                             onSubtitles = ::toggleSubtitles,
+                            audio = audioLabel.value,
+                            onAudio = ::nextAudio,
                             search = subtitleSearch.value,
                             onFindSubtitles = ::findSubtitles,
                             onPickSubtitle = ::attachSubtitle,
@@ -190,7 +200,14 @@ class VodPlayerActivity : ComponentActivity() {
             Marker((m.optDouble("start") * 1000).toLong(), (m.optDouble("end") * 1000).toLong())
         }
         val subs = o.optJSONArray("sidecar_subtitles")
+        val audio = o.optJSONArray("audio_streams")
         return Item(
+            partId = s("part_id"),
+            audioStreams = (0 until (audio?.length() ?: 0)).mapNotNull { i ->
+                audio!!.optJSONObject(i)?.let {
+                    PlexAudio(it.getString("id"), it.optString("language").ifEmpty { null }, it.optString("label"), it.optBoolean("selected"))
+                }
+            },
             intro = marker("intro"),
             credits = marker("credits"),
             sidecars = (0 until (subs?.length() ?: 0)).mapNotNull { i ->
@@ -219,6 +236,11 @@ class VodPlayerActivity : ComponentActivity() {
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(30_000)
             .build()
+        // English audio by default, whatever the file marks as its default
+        // track (or the device's language); else ExoPlayer's usual pick.
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setPreferredAudioLanguage(DEFAULT_AUDIO_LANGUAGE)
+            .build()
         exo.addListener(object : Player.Listener {
             override fun onRenderedFirstFrame() {
                 // Fires again after every seek; only the start is interesting.
@@ -241,6 +263,7 @@ class VodPlayerActivity : ComponentActivity() {
                 val text = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
                 textAvailable.value = text.any { it.isSupported }
                 textOn.value = text.any { it.isSelected }
+                audioLabel.value = currentAudioLabel()
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -326,6 +349,10 @@ class VodPlayerActivity : ComponentActivity() {
         started = SystemClock.elapsedRealtime()
         firstFrameLogged = false
         val exo = player ?: return
+        // A track picked on the last episode doesn't carry over: back to English.
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .build()
         val resumeMs = next.resumeSeconds?.takeIf { it > 30 }?.let { (it * 1000).toLong() } ?: C.TIME_UNSET
         exo.setMediaItem(mediaItem(next, selected = null), resumeMs.takeIf { it != C.TIME_UNSET } ?: 0L)
         exo.playWhenReady = true
@@ -365,31 +392,106 @@ class VodPlayerActivity : ComponentActivity() {
         val exo = player ?: return
         val position = exo.currentPosition.takeIf { it > 0 }
             ?: item.resumeSeconds?.takeIf { it > 30 }?.let { (it * 1000).toLong() } ?: 0L
-        val session = UUID.randomUUID().toString()
-        transcodeSession = session
         showNotice("This file needs converting for your TV. Plex is converting it…", sticky = true)
         Log.i(TAG, "vod | ${item.title}: device can't decode ($why) -> Plex transcode")
+        // The converted stream has only the audio track Plex has selected
+        // on the file: make that English, unless it already is (or there's none).
+        val plexPick = item.audioStreams.firstOrNull { it.selected }
+        val english = item.audioStreams.firstOrNull { isEnglish(it.language) }
+        val audio = english?.takeIf { plexPick == null || !isEnglish(plexPick.language) }
+        convert(position, audio, "Playing a version converted by Plex")
+    }
+
+    /** (Re)start Plex's converted stream at `position`, made with `audio` (null: Plex's selection). */
+    private fun convert(position: Long, pick: PlexAudio?, done: String) {
+        // Plex is told which track by the file's part; without one, its own choice stands.
+        val audio = pick?.takeIf { item.partId != null }
+        transcodeSession?.let { Plex.stopTranscode(server, it) }
+        val session = UUID.randomUUID().toString()
+        transcodeSession = session
         lifecycleScope.launch {
-            val json = Engine.callPlex("plex_transcode_url", server, item.ratingKey, session)
+            val json = Engine.callPlex(
+                "plex_transcode_url", server, item.ratingKey, session,
+                audio?.let { item.partId }, audio?.id,
+            )
+            if (transcodeSession != session) return@launch
             bridgeError(json)?.let {
                 showNotice("Can't play this here, and Plex couldn't convert it: ${redactTokens(it)}", sticky = true)
                 return@launch
             }
             transcodeUrl = org.json.JSONObject(json).getString("url")
+            transcodeAudio = audio?.id ?: item.audioStreams.firstOrNull { it.selected }?.id
             val p = player ?: return@launch
             started = SystemClock.elapsedRealtime()
             firstFrameLogged = false
             p.setMediaItem(mediaItem(item, selected = null), position)
             p.prepare()
             p.playWhenReady = true
-            showNotice("Playing a version converted by Plex")
+            audioLabel.value = currentAudioLabel()
+            showNotice(done)
         }
+    }
+
+    /**
+     * The file's audio tracks ExoPlayer can play, as (group, index) -- or,
+     * while Plex is converting (one track in its stream), none: then the
+     * choice is among Plex's streams instead.
+     */
+    private fun playableAudio(): List<Pair<androidx.media3.common.Tracks.Group, Int>> {
+        if (transcodeUrl != null) return emptyList()
+        val tracks = player?.currentTracks ?: return emptyList()
+        return tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+            .flatMap { g -> (0 until g.length).filter { g.isTrackSupported(it) }.map { g to it } }
+    }
+
+    private fun currentAudioLabel(): String? {
+        if (transcodeUrl != null) {
+            if (item.audioStreams.size < 2 || item.partId == null) return null
+            val s = item.audioStreams.firstOrNull { it.id == transcodeAudio } ?: return "Audio"
+            return languageName(s.language) ?: s.label
+        }
+        val all = playableAudio()
+        if (all.size < 2) return null
+        val (g, i) = all.firstOrNull { (g, i) -> g.isTrackSelected(i) } ?: return "Audio"
+        val f = g.getTrackFormat(i)
+        return languageName(f.language) ?: f.label ?: "Track ${all.indexOf(g to i) + 1}"
+    }
+
+    /** ☰ panel: the next audio track (language), round the file's tracks. */
+    private fun nextAudio() {
+        val exo = player ?: return
+        if (transcodeUrl != null) {
+            val streams = item.audioStreams
+            if (streams.size < 2 || item.partId == null) return
+            val at = streams.indexOfFirst { it.id == transcodeAudio }
+            val next = streams[(at + 1) % streams.size]
+            Log.i(TAG, "vod | audio -> Plex stream ${next.id} (${next.language ?: "?"}), re-converting")
+            showNotice("Audio: ${next.label}. Plex is converting it…", sticky = true)
+            convert(exo.currentPosition, next, "Audio: ${next.label}")
+            return
+        }
+        val all = playableAudio()
+        if (all.size < 2) return
+        val at = all.indexOfFirst { (g, i) -> g.isTrackSelected(i) }
+        val (g, i) = all[(at + 1) % all.size]
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .setOverrideForType(androidx.media3.common.TrackSelectionOverride(g.mediaTrackGroup, i))
+            .build()
+        val f = g.getTrackFormat(i)
+        val name = listOfNotNull(
+            languageName(f.language) ?: f.label ?: "Track ${(at + 1) % all.size + 1}",
+            f.label?.takeIf { languageName(f.language) != null && it != languageName(f.language) },
+            f.channelCount.takeIf { it > 0 }?.let { channels(it) },
+        ).joinToString(" · ")
+        Log.i(TAG, "vod | audio -> ${f.language ?: "?"} ${f.sampleMimeType} ${f.channelCount}ch")
+        showNotice("Audio: $name")
     }
 
     private fun stopTranscode() {
         transcodeSession?.let { Plex.stopTranscode(server, it) }
         transcodeSession = null
         transcodeUrl = null
+        transcodeAudio = null
     }
 
     /** ☰ panel: subtitles off, or back on (a track in the device's language, else any). */
@@ -638,6 +740,28 @@ class VodPlayerActivity : ComponentActivity() {
         private const val PANEL_SCROLL_DP = 92f
         private const val EXTRA_ITEM = "item"
         private const val EXTRA_FROM_START = "from_start"
+        /** Audio always starts in English where the file has it. */
+        private const val DEFAULT_AUDIO_LANGUAGE = "en"
+
+        /** "en", "eng", "en-GB" (ExoPlayer normalises to "en"; Plex may give the 3-letter code). */
+        private fun isEnglish(code: String?): Boolean =
+            code?.lowercase()?.let { it == "en" || it == "eng" || it.startsWith("en-") } == true
+
+        /** "fra" / "fr" -> "French" (in the device's language); null if unknown or undetermined. */
+        private fun languageName(code: String?): String? {
+            if (code.isNullOrBlank() || code == C.LANGUAGE_UNDETERMINED) return null
+            val name = java.util.Locale.forLanguageTag(code).displayLanguage
+            return name.takeIf { it.isNotBlank() && !it.equals(code, ignoreCase = true) }
+                ?.replaceFirstChar { it.titlecase() }
+        }
+
+        private fun channels(n: Int) = when (n) {
+            1 -> "Mono"
+            2 -> "Stereo"
+            6 -> "5.1"
+            8 -> "7.1"
+            else -> "${n}ch"
+        }
 
         /** Errors meaning the device can't decode the file itself (so Plex should convert it). */
         private val UNDECODABLE = setOf(
@@ -719,7 +843,7 @@ private fun PlexNowPlaying(d: PlexDetail, positionMs: Long, durationMs: Long, mo
                     color = Palette.dim, fontSize = 14.sp,
                 )
             }
-            Text("↓  More (or ☰): more about this, picture, subtitles", color = Palette.dim, fontSize = 13.sp)
+            Text("↓  More (or ☰): more about this, picture, audio, subtitles", color = Palette.dim, fontSize = 13.sp)
         }
     }
 }
@@ -735,6 +859,8 @@ private fun PlexNowPlayingFull(
     onPicture: () -> Unit,
     subtitles: Boolean?,
     onSubtitles: () -> Unit,
+    audio: String?,
+    onAudio: () -> Unit,
     search: SubtitleSearch?,
     onFindSubtitles: () -> Unit,
     onPickSubtitle: (SubtitleResult) -> Unit,
@@ -786,7 +912,7 @@ private fun PlexNowPlayingFull(
             Text("${left / 60_000} min left  ·  ends at ${clockText(now + left)}", color = Palette.dim, fontSize = 14.sp)
         }
         androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
-        PanelOptions(picture, onPicture, subtitles, onSubtitles, search, onFindSubtitles, onPickSubtitle)
+        PanelOptions(picture, onPicture, subtitles, onSubtitles, audio, onAudio, search, onFindSubtitles, onPickSubtitle)
         }
         val more = when {
             search != null || scroll.maxValue == 0 -> ""
@@ -805,6 +931,8 @@ private fun PanelOptions(
     onPicture: () -> Unit,
     subtitles: Boolean?,
     onSubtitles: () -> Unit,
+    audio: String?,
+    onAudio: () -> Unit,
     search: SubtitleSearch?,
     onFindSubtitles: () -> Unit,
     onPickSubtitle: (SubtitleResult) -> Unit,
@@ -817,18 +945,32 @@ private fun PanelOptions(
         }
     }
     when (search) {
-        null -> androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+        // One row (↑/↓ scroll the details, so a second row couldn't be
+        // reached); compact, and scrolling sideways with focus if the
+        // buttons outgrow the panel.
+        null -> androidx.compose.foundation.layout.Row(
+            Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            val pad = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp)
             androidx.compose.material3.OutlinedButton(
                 onClick = onPicture,
+                contentPadding = pad,
                 modifier = Modifier.focusRequester(first).focusRing(),
             ) { Text("Picture: ${picture.label}") }
+            // Only when there's another audio track to switch to.
+            if (audio != null) {
+                androidx.compose.material3.OutlinedButton(onClick = onAudio, contentPadding = pad, modifier = Modifier.focusRing()) {
+                    Text("Audio: $audio", maxLines = 1)
+                }
+            }
             // Only when there's a subtitle track to show or hide.
             if (subtitles != null) {
-                androidx.compose.material3.OutlinedButton(onClick = onSubtitles, modifier = Modifier.focusRing()) {
+                androidx.compose.material3.OutlinedButton(onClick = onSubtitles, contentPadding = pad, modifier = Modifier.focusRing()) {
                     Text(if (subtitles) "Subtitles: On" else "Subtitles: Off")
                 }
             }
-            androidx.compose.material3.OutlinedButton(onClick = onFindSubtitles, modifier = Modifier.focusRing()) {
+            androidx.compose.material3.OutlinedButton(onClick = onFindSubtitles, contentPadding = pad, modifier = Modifier.focusRing()) {
                 Text("Find subtitles")
             }
         }

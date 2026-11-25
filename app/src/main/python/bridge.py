@@ -666,15 +666,30 @@ def _video_label(media: dict) -> str | None:
 
 
 @_guarded
-def plex_transcode_url(server: int, rating_key: str, session: str) -> str:
+def plex_transcode_url(
+    server: int, rating_key: str, session: str, part_id: str | None = None, audio_stream_id: str | None = None
+) -> str:
     """For a file this device can't decode: Plex's universal transcoder as
     HLS (H.264/AAC), the way Plex's own apps fall back. `{"url"}` -- the
     master playlist, token included (the session's own segment URLs need
     none). Identifies as the Chrome platform, whose built-in client profile
     makes Plex convert anything a browser can't play; the playlist covers
     the whole item (Plex converts segments on demand), so the player seeks
-    in it normally. Not in tvdinner."""
+    in it normally. Not in tvdinner.
+
+    The converted stream carries one audio track: the one selected on the
+    file's part. With `part_id` and `audio_stream_id` (from plex_resolve's
+    `part_id` / `audio_streams`), that selection is set first, the way
+    Plex's own apps switch language (Plex remembers it for this account)."""
     creds = _plex_server(server)
+    if part_id and audio_stream_id:
+        r = requests.put(
+            f"{creds.base_url}/library/parts/{part_id}",
+            params={"audioStreamID": audio_stream_id, "allParts": "1"},
+            headers={"Accept": "application/json", "X-Plex-Token": creds.token},
+            timeout=15,
+        )
+        r.raise_for_status()
     params = {
         "path": f"/library/metadata/{rating_key}",
         "mediaIndex": "0",
@@ -825,6 +840,19 @@ def _plex_extras(creds: tv_plex.PlexCreds, rating_key: str) -> dict[str, Any]:
     audio = next((st for st in streams if st.get("streamType") == 2 and st.get("selected")), None) or next(
         (st for st in streams if st.get("streamType") == 2), None
     )
+    # Every audio track, so the player can offer them (and, when Plex is
+    # converting, tell Plex which one to convert).
+    audio_streams = [
+        {
+            "id": str(st["id"]),
+            "language": st.get("languageTag") or st.get("languageCode"),
+            "label": st.get("displayTitle") or st.get("language") or f"Track {i + 1}",
+            "selected": bool(st.get("selected")),
+        }
+        for i, st in enumerate(s for s in streams if s.get("streamType") == 2)
+        if st.get("id") is not None
+    ]
+    part_id = next((p.get("id") for p in parts if isinstance(p, dict) and p.get("id") is not None), None)
     return {
         "duration_ms": meta.get("duration") or media.get("duration"),
         "content_rating": meta.get("contentRating"),
@@ -838,6 +866,8 @@ def _plex_extras(creds: tv_plex.PlexCreds, rating_key: str) -> dict[str, Any]:
         "episode": meta.get("index"),
         "video": _video_label(media),
         "audio": audio.get("displayTitle") if audio else None,
+        "audio_streams": audio_streams,
+        "part_id": str(part_id) if part_id is not None else None,
         "subtitles": [st.get("displayTitle") or st.get("language") for st in streams if st.get("streamType") == 3],
         "sidecar_subtitles": sidecars,
     }
