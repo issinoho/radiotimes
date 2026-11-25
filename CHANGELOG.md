@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.2
+
+- **Plex audio in English, and an Audio button**: Plex films and episodes
+  now always start on an English audio track when the file has one, even
+  if the file marks another language as its default. To change language,
+  open ☰ (or **More**) and press **Audio**; each press moves to the next
+  track. The button only shows when there's more than one track. Files
+  Plex has to convert for the TV get the same choice: Plex converts the
+  track you pick, picking up where you were (and remembers it for your
+  account).
+
 ## 0.8.1
 
 - **Search channels by name**: a **Search channels** entry at the top of
