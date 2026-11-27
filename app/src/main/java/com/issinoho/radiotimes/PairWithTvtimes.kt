@@ -99,14 +99,23 @@ fun PairWithTvtimes(
 
     when (val s = state) {
         PairState.Idle -> {
-            Button(onClick = { search() }, modifier = Modifier.focusRequester(first).focusRing()) { Text(label) }
+            // Away from home the network scan can't find it, so typing its
+            // web address is offered up front rather than only after a scan.
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = { search() }, modifier = Modifier.focusRequester(first).focusRing()) { Text(label) }
+                OutlinedButton(onClick = { state = PairState.Typing }, modifier = Modifier.focusRing()) { Text("Enter its address") }
+            }
+            Text(
+                "At home, pair finds it on your network. Away, enter its web address (e.g. tv.example.com).",
+                color = Palette.dim, fontSize = 14.sp,
+            )
             LaunchedEffect(Unit) { if (focusFirst) runCatching { first.requestFocus() } }
         }
         PairState.Searching -> Text("Looking for tvtimes on your network…", color = Palette.text, fontSize = 17.sp)
         is PairState.Found -> {
             val pick = remember { FocusRequester() }
             if (s.servers.isEmpty()) {
-                Text("Didn't find tvtimes on this network.", color = Palette.text, fontSize = 17.sp)
+                Text("Didn't find tvtimes on this network. Away from home? Enter its web address.", color = Palette.text, fontSize = 17.sp)
             } else {
                 Text("Found tvtimes:", color = Palette.dim, fontSize = 15.sp)
             }

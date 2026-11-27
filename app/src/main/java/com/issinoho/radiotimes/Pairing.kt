@@ -70,12 +70,16 @@ object Pairing {
     /**
      * What the user typed: an IP, host, host:port, or a URL with a path (a
      * tvtimes behind a reverse proxy). Tries https then http when no scheme
-     * is given, and :8888 when no port either.
+     * is given, and :8888 when no port either. A typed `http://` also tries
+     * `https://`: a reverse proxy forcing SSL answers http with a redirect to
+     * https, which HttpURLConnection won't follow across schemes.
      */
     suspend fun check(typed: String): Server? = withContext(Dispatchers.IO) {
         val t = typed.trim().trimEnd('/')
         if (t.isEmpty()) return@withContext null
-        val candidates = if ("://" in t) {
+        val candidates = if (t.startsWith("http://", ignoreCase = true)) {
+            listOf(t, "https://" + t.substring("http://".length))
+        } else if ("://" in t) {
             listOf(t)
         } else {
             val hasPort = Regex("""^[^/]+:\d+""").containsMatchIn(t)
