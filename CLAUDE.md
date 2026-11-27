@@ -80,7 +80,9 @@ from CI.
   3.12+ target ships that ABI (checked on Maven Central).
 - Android has no tz database where CPython looks, so bridge.py avoids
   `zoneinfo`; Kotlin formats times in the device zone.
-- tvtimes `/stream/<id>` is a 302 to the upstream URL. ExoPlayer picks
+- tvtimes `/stream/<id>` is a 302 to the upstream URL, or (for a source
+  tvtimes relays, tvtimes 1.10+) to a `/api/exports/relay/...` URL that
+  ends in a file name with an extension where known. ExoPlayer picks
   HLS vs progressive from the URI it's given, so `StreamResolver` follows
   the redirect first, stopping as soon as an extension settles the type
   (IPTV providers often allow one connection per account).

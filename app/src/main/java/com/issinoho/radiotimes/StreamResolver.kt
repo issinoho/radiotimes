@@ -7,8 +7,11 @@ import java.net.URL
 /**
  * Turns a tvtimes stream URL into something ExoPlayer can be told the type of.
  *
- * tvtimes' `/api/exports/stream/<id>` answers with a 302 to the real upstream
- * URL, so provider credentials never sit in the playlist. ExoPlayer chooses
+ * tvtimes' `/api/exports/stream/<id>` answers with a 302: to the real
+ * upstream URL, or, for a source tvtimes relays (so it plays away from home),
+ * to a tvtimes relay URL whose last segment carries an extension where one is
+ * known (`stream.ts` for HDHomeRun). Provider credentials never sit in the
+ * playlist. ExoPlayer chooses
  * between HLS and a progressive (MPEG-TS) source from the URI it is *given*,
  * before following any redirect -- and the tvtimes URL has no extension, so
  * an HLS channel would be fed to the progressive extractor and fail. So the
@@ -79,5 +82,13 @@ object StreamResolver {
     }
 }
 
-/** Mask `token=` (tvtimes) and `X-Plex-Token=` values in free text. */
-fun redactTokens(text: String): String = Regex("""(?i)(token=)[^&"\s]+""").replace(text, "$1…")
+/**
+ * Mask `token=` / `ticket=` (tvtimes) and `X-Plex-Token=` values in free
+ * text, and the token path segment of tvtimes relay URLs
+ * (`/api/exports/relay/<profile>/<token>/<name>`).
+ */
+fun redactTokens(text: String): String =
+    Regex("""(?i)(/relay/[^/\s"?]+/)[^/\s"?]+""").replace(
+        Regex("""(?i)((?:token|ticket)=)[^&"\s]+""").replace(text, "$1…"),
+        "$1…",
+    )
