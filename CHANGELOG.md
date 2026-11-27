@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.3
+
+- **Pairing away from home**: the pairing screen now offers **Enter its
+  address** next to **Pair with tvtimes** from the start, with a hint
+  that away from home you type tvtimes' web address (e.g.
+  `tv.example.com`) instead of searching, since the network search only
+  finds tvtimes on the TV's own network. Pairs with a tvtimes behind a
+  reverse proxy such as Nginx Proxy Manager; with tvtimes 1.10's stream
+  relay, its channels then play away from home too. A typed `http://`
+  address also tries `https://`, so a proxy that forces SSL still pairs.
+- Error messages also hide the token in tvtimes relay stream addresses.
+
 ## 0.8.2
 
 - **Plex audio in English, and an Audio button**: Plex films and episodes
